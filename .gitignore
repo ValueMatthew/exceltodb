@@ -1,0 +1,28 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Maven
+server/target/
+
+# Java
+*.class
+*.jar
+*.war
+
+# Upload temp
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with real passwords
+config.yaml
+!config.yaml.example

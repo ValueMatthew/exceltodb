@@ -1,0 +1,34 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+logging:
+  level:
+    com.exceltodb: DEBUG
+    org.springframework: INFO
+
+app:
+  config-file: ../config.yaml
+  upload:
+    temp-path: ./uploads
+  import:
+    batch-size: 5000

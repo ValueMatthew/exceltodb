@@ -1,0 +1,23 @@
+databases:
+  - id: prod_erp
+    name: 生产ERP系统
+    host: localhost
+    port: 3306
+    username: root
+    password: your_password
+    database: erp_db
+
+  - id: prod_wms
+    name: 仓储管理系统
+    host: localhost
+    port: 3306
+    username: root
+    password: your_password
+    database: wms_db
+
+upload:
+  maxSize: 100MB
+  tempPath: ./uploads
+
+import:
+  batchSize: 5000
