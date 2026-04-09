@@ -1,42 +1,88 @@
 <template>
   <div class="data-preview">
-    <h2>数据预览</h2>
-    <p class="tip">请确认列名正确无误后继续</p>
+    <div class="section-header">
+      <div class="section-icon preview-icon-bg">
+        <el-icon><data-analysis /></el-icon>
+      </div>
+      <div>
+        <h2>数据预览</h2>
+        <p class="subtitle">请确认列名和数据内容正确无误后继续</p>
+      </div>
+    </div>
 
-    <div v-if="loading" class="loading">
+    <div v-if="loading" class="loading-state">
       <el-icon class="is-loading"><loading /></el-icon>
-      <span>正在加载数据...</span>
+      <span>正在加载预览数据...</span>
     </div>
 
     <div v-else-if="previewData" class="preview-container">
       <div class="info-bar">
-        <el-tag>文件名: {{ previewData.filename }}</el-tag>
-        <el-tag type="info">Sheet: {{ previewData.sheetName }}</el-tag>
-        <el-tag type="success">总行数: {{ previewData.totalRows }}</el-tag>
-        <el-tag type="warning">预览: 前 {{ previewData.previewRows?.length || 0 }} 行</el-tag>
+        <el-card shadow="never" class="info-card">
+          <div class="info-items">
+            <div class="info-item">
+              <el-icon><document /></el-icon>
+              <span class="info-label">文件名</span>
+              <span class="info-value">{{ previewData.filename }}</span>
+            </div>
+            <div class="info-item">
+              <el-icon><grid /></el-icon>
+              <span class="info-label">Sheet</span>
+              <el-tag size="small" type="info">{{ previewData.sheetName }}</el-tag>
+            </div>
+            <div class="info-item">
+              <el-icon><list /></el-icon>
+              <span class="info-label">总行数</span>
+              <el-tag size="small" type="success">{{ previewData.totalRows }}</el-tag>
+            </div>
+            <div class="info-item">
+              <el-icon><view /></el-icon>
+              <span class="info-label">预览</span>
+              <el-tag size="small" type="warning">前 {{ previewData.previewRows?.length || 0 }} 行</el-tag>
+            </div>
+          </div>
+        </el-card>
       </div>
 
-      <el-table
-        :data="previewData.previewRows"
-        border
-        stripe
-        :max-height="400"
-        style="width: 100%; margin-top: 20px"
-      >
-        <el-table-column
+      <div class="table-wrapper">
+        <el-table
+          :data="previewData.previewRows"
+          border
+          stripe
+          :max-height="420"
+          style="width: 100%"
+          :header-cell-style="{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff', fontWeight: '600' }"
+          :row-class-name="tableRowClassName"
+        >
+          <el-table-column
+            v-for="(col, index) in previewData.columns"
+            :key="index"
+            :prop="col"
+            :label="col"
+            min-width="150"
+            show-overflow-tooltip
+          />
+        </el-table>
+      </div>
+
+      <div class="column-tags">
+        <span class="column-label">列名列表：</span>
+        <el-tag
           v-for="(col, index) in previewData.columns"
           :key="index"
-          :prop="col"
-          :label="col"
-          min-width="150"
-        />
-      </el-table>
+          size="small"
+          effect="plain"
+          class="column-tag"
+        >
+          {{ index + 1 }}. {{ col }}
+        </el-tag>
+      </div>
     </div>
 
     <div class="actions">
-      <el-button @click="$emit('back')">上一步</el-button>
-      <el-button type="primary" @click="handleNext">
+      <el-button @click="$emit('back')" size="large">上一步</el-button>
+      <el-button type="primary" size="large" @click="handleNext" class="next-btn">
         下一步
+        <el-icon class="el-icon--right"><arrow-right /></el-icon>
       </el-button>
     </div>
   </div>
@@ -46,13 +92,20 @@
 import { ref, onMounted, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import {
+  DataAnalysis, Loading, Document, Grid, List, View, ArrowRight
+} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next', 'back'])
 const uploadedFile = inject('uploadedFile')
 const previewData = inject('previewData')
 
 const loading = ref(false)
+
+const tableRowClassName = ({ rowIndex }) => {
+  if (rowIndex % 2 === 0) return 'even-row'
+  return 'odd-row'
+}
 
 const loadPreview = async () => {
   if (!uploadedFile.value?.filename) {
@@ -86,39 +139,138 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-h2 {
-  margin-bottom: 10px;
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.preview-icon-bg {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+}
+
+.section-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 22px;
   color: #303133;
 }
 
-.tip {
+.subtitle {
   color: #909399;
-  margin-bottom: 30px;
+  font-size: 14px;
+  margin: 0;
 }
 
-.loading {
+.loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #909399;
-  padding: 40px;
-}
-
-.preview-container {
-  margin-top: 20px;
+  color: #667eea;
+  padding: 60px 20px;
+  font-size: 16px;
 }
 
 .info-bar {
+  margin-bottom: 20px;
+}
+
+.info-card {
+  border: none;
+  background: #fafafa;
+}
+
+.info-items {
   display: flex;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 20px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.info-item .el-icon {
+  color: #667eea;
+}
+
+.info-label {
+  color: #909399;
+}
+
+.info-value {
+  color: #303133;
+  font-weight: 500;
+}
+
+.table-wrapper {
+  margin: 20px 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
+}
+
+.column-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+
+.column-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.column-tag {
+  margin: 2px;
 }
 
 .actions {
-  margin-top: 30px;
+  margin-top: 32px;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
+}
+
+.next-btn {
+  padding: 0 40px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+:deep(.even-row) {
+  background: #fafafa;
+}
+
+:deep(.odd-row) {
+  background: #fff;
+}
+
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped td) {
+  background: #fafafa;
 }
 </style>

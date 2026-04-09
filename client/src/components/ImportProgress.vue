@@ -1,40 +1,123 @@
 <template>
   <div class="import-progress">
-    <h2>数据导入</h2>
-
-    <div v-if="status === 'idle' || status === 'importing'" class="progress-container">
-      <el-progress
-        :percentage="progress"
-        :status="progressStatus"
-        :stroke-width="20"
-        striped
-        striped-flow
-      />
-      <p class="progress-text">{{ statusText }}</p>
-      <p class="detail-text">{{ detailText }}</p>
+    <div class="section-header">
+      <div class="section-icon" :class="statusIconBg">
+        <el-icon><component :is="statusIcon" /></el-icon>
+      </div>
+      <div>
+        <h2>数据导入</h2>
+        <p class="subtitle" v-if="status === 'importing'">正在导入数据，请稍候...</p>
+        <p class="subtitle" v-else-if="status === 'success'">导入完成</p>
+        <p class="subtitle" v-else-if="status === 'error'">导入失败</p>
+        <p class="subtitle" v-else>准备开始导入...</p>
+      </div>
     </div>
 
-    <div v-else-if="status === 'success'" class="result success">
+    <div v-if="status === 'idle' || status === 'importing'" class="progress-container">
+      <div class="progress-circle-wrapper">
+        <el-progress
+          type="circle"
+          :percentage="progress"
+          :status="progressStatus"
+          :stroke-width="12"
+          :width="180"
+        >
+          <template #default="{ percentage }">
+            <div class="progress-inner">
+              <span class="progress-value">{{ percentage }}%</span>
+              <span class="progress-label">已完成</span>
+            </div>
+          </template>
+        </el-progress>
+      </div>
+
+      <div class="progress-info">
+        <el-card shadow="never" class="info-card">
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">导入模式</span>
+              <el-tag :type="params.importMode === 'INCREMENTAL' ? 'success' : 'warning'" size="small">
+                {{ params.importMode === 'INCREMENTAL' ? '增量导入' : '清空导入' }}
+              </el-tag>
+            </div>
+            <div class="info-item">
+              <span class="info-label">冲突策略</span>
+              <el-tag type="info" size="small">
+                {{ conflictStrategyText }}
+              </el-tag>
+            </div>
+            <div class="info-item">
+              <span class="info-label">目标表</span>
+              <span class="info-value">{{ params.tableName }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">文件名</span>
+              <span class="info-value">{{ params.filename }}</span>
+            </div>
+          </div>
+        </el-card>
+      </div>
+
+      <div class="status-messages">
+        <transition name="el-fade-in">
+          <el-alert
+            v-if="detailText"
+            type="info"
+            :closable="false"
+            show-icon
+            class="status-alert"
+          >
+            {{ detailText }}
+          </el-alert>
+        </transition>
+      </div>
+    </div>
+
+    <div v-else-if="status === 'success'" class="result-container">
       <el-result
         icon="success"
         title="导入成功"
-        :sub-title="`共导入 ${resultData?.importedRows || 0} 行数据`"
+        class="result-card"
       >
+        <template #sub-title>
+          <div class="success-info">
+            <p>共导入 <strong class="highlight">{{ resultData?.importedRows || 0 }}</strong> 行数据</p>
+            <p class="success-tip">数据已成功写入数据库</p>
+          </div>
+        </template>
         <template #extra>
-          <el-button type="primary" @click="handleReset">重新导入</el-button>
+          <div class="result-actions">
+            <el-button type="primary" size="large" @click="handleReset" class="action-btn">
+              <el-icon><refresh-left /></el-icon>
+              重新导入
+            </el-button>
+          </div>
         </template>
       </el-result>
     </div>
 
-    <div v-else-if="status === 'error'" class="result error">
+    <div v-else-if="status === 'error'" class="result-container">
       <el-result
         icon="error"
         title="导入失败"
-        :sub-title="errorMessage"
+        class="result-card"
       >
+        <template #sub-title>
+          <div class="error-info">
+            <p class="error-message">{{ errorMessage }}</p>
+            <p class="error-tip">请检查数据格式或数据库连接后重试</p>
+          </div>
+        </template>
         <template #extra>
-          <el-button @click="handleReset">重新导入</el-button>
-          <el-button type="primary" @click="handleBack">返回上一步</el-button>
+          <div class="result-actions">
+            <el-button size="large" @click="handleReset" class="action-btn">
+              <el-icon><refresh-left /></el-icon>
+              重新导入
+            </el-button>
+            <el-button type="primary" size="large" @click="handleBack" class="action-btn">
+              返回重试
+            </el-button>
+          </div>
         </template>
       </el-result>
     </div>
@@ -42,9 +125,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import {
+  Upload, Check, CircleClose, RefreshLeft
+} from '@element-plus/icons-vue'
 
 const props = defineProps({
   params: {
@@ -57,18 +143,41 @@ const emit = defineEmits(['reset', 'back'])
 
 const status = ref('idle')
 const progress = ref(0)
-const statusText = ref('准备开始导入...')
 const detailText = ref('')
 const errorMessage = ref('')
 const resultData = ref(null)
 
-const progressStatus = ref('')
+const progressStatus = computed(() => {
+  if (status.value === 'error') return 'exception'
+  if (status.value === 'success') return 'success'
+  return ''
+})
+
+const statusIcon = computed(() => {
+  if (status.value === 'success') return Check
+  if (status.value === 'error') return CircleClose
+  return Upload
+})
+
+const statusIconBg = computed(() => {
+  if (status.value === 'success') return 'success-icon-bg'
+  if (status.value === 'error') return 'error-icon-bg'
+  return 'importing-icon-bg'
+})
+
+const conflictStrategyText = computed(() => {
+  const map = {
+    'ERROR': '报错',
+    'UPDATE': '更新 (UPSERT)',
+    'IGNORE': '忽略'
+  }
+  return map[props.params.conflictStrategy] || props.params.conflictStrategy
+})
 
 const startImport = async () => {
   status.value = 'importing'
   progress.value = 0
-  statusText.value = '正在导入数据...'
-  detailText.value = '连接数据库...'
+  detailText.value = '正在连接数据库...'
 
   try {
     const res = await axios.post('/api/import', props.params, {
@@ -76,26 +185,20 @@ const startImport = async () => {
         if (progressEvent.total) {
           const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
           progress.value = Math.min(percent, 100)
-          detailText.value = `已上传 ${formatNumber(progressEvent.loaded)} / ${formatNumber(progressEvent.total)} 字节`
+          detailText.value = `处理中... ${percent}%`
         }
       }
     })
 
     resultData.value = res.data
     progress.value = 100
-    statusText.value = '导入完成'
-    detailText.value = ''
     status.value = 'success'
+    detailText.value = ''
   } catch (err) {
     status.value = 'error'
-    progressStatus.value = 'exception'
     errorMessage.value = err.response?.data?.message || err.message || '未知错误'
     ElMessage.error('导入失败: ' + errorMessage.value)
   }
-}
-
-const formatNumber = (num) => {
-  return new Intl.NumberFormat().format(num)
 }
 
 const handleReset = () => {
@@ -115,36 +218,174 @@ onMounted(() => {
 .import-progress {
   max-width: 600px;
   margin: 0 auto;
-  text-align: center;
 }
 
-h2 {
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: #fff;
+}
+
+.importing-icon-bg {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.success-icon-bg {
+  background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%);
+  box-shadow: 0 4px 15px rgba(103, 194, 58, 0.4);
+}
+
+.error-icon-bg {
+  background: linear-gradient(135deg, #f56c6c 0%, #e6a23c 100%);
+  box-shadow: 0 4px 15px rgba(245, 108, 108, 0.4);
+}
+
+.section-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 22px;
   color: #303133;
+}
+
+.subtitle {
+  color: #909399;
+  font-size: 14px;
+  margin: 0;
 }
 
 .progress-container {
-  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 0;
 }
 
-.progress-text {
-  margin-top: 20px;
-  font-size: 16px;
+.progress-circle-wrapper {
+  margin-bottom: 32px;
+}
+
+.progress-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.progress-value {
+  font-size: 32px;
+  font-weight: 700;
   color: #303133;
 }
 
-.detail-text {
-  margin-top: 10px;
-  font-size: 14px;
+.progress-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.progress-info {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.info-card {
+  border: none;
+  background: #fafafa;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.info-label {
+  font-size: 12px;
   color: #909399;
 }
 
-.result {
-  padding: 40px 20px;
+.info-value {
+  font-size: 14px;
+  color: #303133;
+  font-weight: 500;
 }
 
-.result.success,
-.result.error {
+.status-messages {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.status-alert {
+  border-radius: 8px;
+}
+
+.result-container {
+  padding: 20px 0;
+}
+
+.result-card {
+  border: none;
+}
+
+.success-info,
+.error-info {
   text-align: center;
+}
+
+.success-info p {
+  margin: 8px 0;
+  font-size: 15px;
+  color: #606266;
+}
+
+.highlight {
+  color: #67c23a;
+  font-size: 18px;
+}
+
+.success-tip {
+  color: #909399 !important;
+  font-size: 13px !important;
+}
+
+.error-message {
+  color: #f56c6c;
+  font-size: 15px;
+  margin: 8px 0;
+}
+
+.error-tip {
+  color: #909399 !important;
+  font-size: 13px !important;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  min-width: 140px;
 }
 </style>

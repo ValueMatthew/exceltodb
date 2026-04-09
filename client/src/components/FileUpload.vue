@@ -1,7 +1,14 @@
 <template>
   <div class="file-upload">
-    <h2>上传数据文件</h2>
-    <p class="tip">支持 .xlsx、.xls、.csv 格式，最大 100MB</p>
+    <div class="section-header">
+      <div class="section-icon upload-icon-bg">
+        <el-icon><upload /></el-icon>
+      </div>
+      <div>
+        <h2>上传数据文件</h2>
+        <p class="subtitle">支持 .xlsx、.xls、.csv 格式，单个文件最大 100MB</p>
+      </div>
+    </div>
 
     <el-upload
       ref="uploadRef"
@@ -14,41 +21,82 @@
       :limit="1"
       accept=".xlsx,.xls,.csv"
     >
-      <el-icon class="upload-icon"><upload-filled /></el-icon>
-      <div class="upload-text">
-        <span>将文件拖到此处，或<em>点击上传</em></span>
+      <div class="upload-content">
+        <div class="upload-icon-wrapper">
+          <el-icon class="upload-icon-large"><upload-filled /></el-icon>
+        </div>
+        <div class="upload-text">
+          <span class="primary-text">将文件拖到此处</span>
+          <span class="secondary-text">或<em>点击上传</em></span>
+        </div>
+        <div class="upload-tips">
+          <el-tag size="small" effect="plain">.xlsx</el-tag>
+          <el-tag size="small" effect="plain">.xls</el-tag>
+          <el-tag size="small" effect="plain">.csv</el-tag>
+        </div>
       </div>
-      <template #tip>
-        <div class="el-upload__tip">单个文件不超过100MB</div>
-      </template>
     </el-upload>
 
-    <div v-if="fileInfo" class="file-info">
-      <el-descriptions title="文件信息" :column="2" border>
-        <el-descriptions-item label="文件名">{{ fileInfo.name }}</el-descriptions-item>
-        <el-descriptions-item label="文件大小">{{ formatSize(fileInfo.size) }}</el-descriptions-item>
-        <el-descriptions-item label="文件类型">{{ fileInfo.type || 'Unknown' }}</el-descriptions-item>
-      </el-descriptions>
-    </div>
+    <transition name="el-fade-in">
+      <div v-if="fileInfo" class="file-info-card">
+        <el-card shadow="hover" class="info-card">
+          <template #header>
+            <div class="card-header">
+              <el-icon class="file-icon"><document /></el-icon>
+              <span class="file-name">{{ fileInfo.name }}</span>
+            </div>
+          </template>
+          <div class="file-meta">
+            <div class="meta-item">
+              <span class="meta-label">文件大小</span>
+              <span class="meta-value">{{ formatSize(fileInfo.size) }}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">文件类型</span>
+              <span class="meta-value">{{ getFileType(fileInfo.name) }}</span>
+            </div>
+          </div>
+        </el-card>
+      </div>
+    </transition>
 
-    <div v-if="parseResult" class="parse-result">
-      <el-alert type="success" :closable="false">
-        <template #title>
-          解析成功！Sheet: {{ parseResult.sheetName }}, 行数: {{ parseResult.rowCount }}
-        </template>
-      </el-alert>
-    </div>
+    <transition name="el-fade-in">
+      <div v-if="parseResult" class="parse-result">
+        <el-alert
+          type="success"
+          :closable="false"
+          show-icon
+          class="success-alert"
+        >
+          <template #title>
+            <span class="success-text">
+              <el-icon><circle-check /></el-icon>
+              解析成功！Sheet: <strong>{{ parseResult.sheetName }}</strong>，共 <strong>{{ parseResult.rowCount }}</strong> 行数据
+            </span>
+          </template>
+        </el-alert>
+      </div>
+    </transition>
 
-    <div v-if="parseError" class="parse-error">
-      <el-alert type="error" :closable="false">
-        <template #title>{{ parseError }}</template>
-      </el-alert>
-    </div>
+    <transition name="el-fade-in">
+      <div v-if="parseError" class="parse-error">
+        <el-alert type="error" :closable="false" show-icon>
+          <template #title>{{ parseError }}</template>
+        </el-alert>
+      </div>
+    </transition>
 
     <div class="actions">
-      <el-button @click="$emit('back')">上一步</el-button>
-      <el-button type="primary" @click="handleNext" :disabled="!canProceed">
+      <el-button @click="$emit('back')" size="large">上一步</el-button>
+      <el-button
+        type="primary"
+        size="large"
+        @click="handleNext"
+        :disabled="!canProceed"
+        class="next-btn"
+      >
         下一步
+        <el-icon class="el-icon--right"><arrow-right /></el-icon>
       </el-button>
     </div>
   </div>
@@ -58,7 +106,9 @@
 import { ref, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { UploadFilled } from '@element-plus/icons-vue'
+import {
+  Upload, UploadFilled, Document, CircleCheck, ArrowRight
+} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next', 'back'])
 const uploadedFile = inject('uploadedFile')
@@ -69,7 +119,6 @@ const currentFile = ref(null)
 const fileInfo = ref(null)
 const parseResult = ref(null)
 const parseError = ref(null)
-
 const canProceed = ref(false)
 
 const handleFileChange = async (file) => {
@@ -83,7 +132,6 @@ const handleFileChange = async (file) => {
   parseResult.value = null
   canProceed.value = false
 
-  // 自动上传并解析
   const formData = new FormData()
   formData.append('file', file.raw)
 
@@ -94,7 +142,7 @@ const handleFileChange = async (file) => {
     parseResult.value = res.data
     canProceed.value = true
   } catch (err) {
-    parseError.value = err.response?.data?.message || '文件解析失败'
+    parseError.value = err.response?.data?.message || '文件解析失败，请检查文件格式'
     ElMessage.error(parseError.value)
   }
 }
@@ -113,6 +161,16 @@ const formatSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
 }
 
+const getFileType = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase()
+  const types = {
+    xlsx: 'Excel 2007+',
+    xls: 'Excel 97-2003',
+    csv: 'CSV 文件'
+  }
+  return types[ext] || ext.toUpperCase()
+}
+
 const handleNext = () => {
   if (parseResult.value) {
     uploadedFile.value = {
@@ -126,41 +184,158 @@ const handleNext = () => {
 
 <style scoped>
 .file-upload {
-  max-width: 800px;
+  max-width: 700px;
   margin: 0 auto;
 }
 
-h2 {
-  margin-bottom: 10px;
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.upload-icon-bg {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+}
+
+.section-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 22px;
   color: #303133;
 }
 
-.tip {
+.subtitle {
   color: #909399;
-  margin-bottom: 30px;
+  font-size: 14px;
+  margin: 0;
 }
 
 .upload-area {
-  margin-bottom: 20px;
+  width: 100%;
 }
 
-.upload-icon {
-  font-size: 67px;
-  color: #8c939d;
-  margin-bottom: 16px;
+.upload-area :deep(.el-upload-dragger) {
+  padding: 40px;
+  border-radius: 16px;
+  border: 2px dashed #dcdfe6;
+  background: #fafafa;
+  transition: all 0.3s;
+}
+
+.upload-area :deep(.el-upload-dragger:hover) {
+  border-color: #667eea;
+  background: #f5f7ff;
+}
+
+.upload-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.upload-icon-wrapper {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-icon-large {
+  font-size: 36px;
+  color: #fff;
 }
 
 .upload-text {
-  color: #606266;
+  text-align: center;
 }
 
-.upload-text em {
-  color: #409eff;
+.primary-text {
+  display: block;
+  font-size: 16px;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.secondary-text {
+  font-size: 14px;
+  color: #909399;
+}
+
+.secondary-text em {
+  color: #667eea;
   font-style: normal;
+  font-weight: 600;
 }
 
-.file-info {
-  margin-top: 20px;
+.upload-tips {
+  display: flex;
+  gap: 8px;
+}
+
+.file-info-card {
+  margin-top: 24px;
+}
+
+.info-card {
+  border: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-icon {
+  font-size: 20px;
+  color: #667eea;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #303133;
+}
+
+.file-meta {
+  display: flex;
+  gap: 32px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.meta-value {
+  font-size: 14px;
+  color: #303133;
+  font-weight: 500;
 }
 
 .parse-result,
@@ -168,10 +343,27 @@ h2 {
   margin-top: 20px;
 }
 
+.success-alert {
+  border: none;
+  background: linear-gradient(135deg, rgba(103, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+}
+
+.success-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .actions {
-  margin-top: 30px;
+  margin-top: 32px;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
+}
+
+.next-btn {
+  padding: 0 40px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
 }
 </style>
