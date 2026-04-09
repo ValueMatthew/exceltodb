@@ -3,7 +3,7 @@
     <div class="header">
       <div class="header-content">
         <div class="logo">
-          <el-icon class="logo-icon"><document-add /></el-icon>
+          <span class="logo-icon">📊</span>
           <span class="logo-text">Excel To DB</span>
         </div>
         <div class="header-tag">
@@ -42,7 +42,6 @@
 
 <script setup>
 import { ref, provide } from 'vue'
-import { DocumentAdd } from '@element-plus/icons-vue'
 import DbSelector from './components/DbSelector.vue'
 import FileUpload from './components/FileUpload.vue'
 import DataPreview from './components/DataPreview.vue'

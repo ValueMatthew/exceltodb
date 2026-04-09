@@ -2,7 +2,7 @@
   <div class="import-progress">
     <div class="section-header">
       <div class="section-icon" :class="statusIconBg">
-        <el-icon><component :is="statusIcon" /></el-icon>
+        <span class="icon-text">{{ statusIcon }}</span>
       </div>
       <div>
         <h2>数据导入</h2>
@@ -88,8 +88,7 @@
         <template #extra>
           <div class="result-actions">
             <el-button type="primary" size="large" @click="handleReset" class="action-btn">
-              <el-icon><refresh-left /></el-icon>
-              重新导入
+              🔄 重新导入
             </el-button>
           </div>
         </template>
@@ -111,8 +110,7 @@
         <template #extra>
           <div class="result-actions">
             <el-button size="large" @click="handleReset" class="action-btn">
-              <el-icon><refresh-left /></el-icon>
-              重新导入
+              🔄 重新导入
             </el-button>
             <el-button type="primary" size="large" @click="handleBack" class="action-btn">
               返回重试
@@ -128,9 +126,6 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import {
-  Upload, Check, CircleClose, RefreshLeft
-} from '@element-plus/icons-vue'
 
 const props = defineProps({
   params: {
@@ -154,9 +149,9 @@ const progressStatus = computed(() => {
 })
 
 const statusIcon = computed(() => {
-  if (status.value === 'success') return Check
-  if (status.value === 'error') return CircleClose
-  return Upload
+  if (status.value === 'success') return '✅'
+  if (status.value === 'error') return '❌'
+  return '⏳'
 })
 
 const statusIconBg = computed(() => {
@@ -237,7 +232,6 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   font-size: 26px;
-  color: #fff;
 }
 
 .importing-icon-bg {

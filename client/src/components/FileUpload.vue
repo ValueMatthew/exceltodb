@@ -2,7 +2,7 @@
   <div class="file-upload">
     <div class="section-header">
       <div class="section-icon upload-icon-bg">
-        <el-icon><upload /></el-icon>
+        <span class="icon-text">📤</span>
       </div>
       <div>
         <h2>上传数据文件</h2>
@@ -23,7 +23,7 @@
     >
       <div class="upload-content">
         <div class="upload-icon-wrapper">
-          <el-icon class="upload-icon-large"><upload-filled /></el-icon>
+          <span class="upload-icon-large">📁</span>
         </div>
         <div class="upload-text">
           <span class="primary-text">将文件拖到此处</span>
@@ -42,7 +42,7 @@
         <el-card shadow="hover" class="info-card">
           <template #header>
             <div class="card-header">
-              <el-icon class="file-icon"><document /></el-icon>
+              <span class="file-icon">📄</span>
               <span class="file-name">{{ fileInfo.name }}</span>
             </div>
           </template>
@@ -70,8 +70,7 @@
         >
           <template #title>
             <span class="success-text">
-              <el-icon><circle-check /></el-icon>
-              解析成功！Sheet: <strong>{{ parseResult.sheetName }}</strong>，共 <strong>{{ parseResult.rowCount }}</strong> 行数据
+              ✅ 解析成功！Sheet: <strong>{{ parseResult.sheetName }}</strong>，共 <strong>{{ parseResult.rowCount }}</strong> 行数据
             </span>
           </template>
         </el-alert>
@@ -95,8 +94,7 @@
         :disabled="!canProceed"
         class="next-btn"
       >
-        下一步
-        <el-icon class="el-icon--right"><arrow-right /></el-icon>
+        下一步 →
       </el-button>
     </div>
   </div>
@@ -106,9 +104,6 @@
 import { ref, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import {
-  Upload, UploadFilled, Document, CircleCheck, ArrowRight
-} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next', 'back'])
 const uploadedFile = inject('uploadedFile')
@@ -209,7 +204,6 @@ const handleNext = () => {
 
 .upload-icon-bg {
   background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  color: #fff;
   box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
 }
 
@@ -261,7 +255,6 @@ const handleNext = () => {
 
 .upload-icon-large {
   font-size: 36px;
-  color: #fff;
 }
 
 .upload-text {
@@ -308,7 +301,6 @@ const handleNext = () => {
 
 .file-icon {
   font-size: 20px;
-  color: #667eea;
 }
 
 .file-name {

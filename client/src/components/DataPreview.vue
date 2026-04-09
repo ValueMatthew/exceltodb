@@ -2,7 +2,7 @@
   <div class="data-preview">
     <div class="section-header">
       <div class="section-icon preview-icon-bg">
-        <el-icon><data-analysis /></el-icon>
+        <span class="icon-text">📊</span>
       </div>
       <div>
         <h2>数据预览</h2>
@@ -20,22 +20,22 @@
         <el-card shadow="never" class="info-card">
           <div class="info-items">
             <div class="info-item">
-              <el-icon><document /></el-icon>
+              <span class="info-icon">📄</span>
               <span class="info-label">文件名</span>
               <span class="info-value">{{ previewData.filename }}</span>
             </div>
             <div class="info-item">
-              <el-icon><grid /></el-icon>
+              <span class="info-icon">📑</span>
               <span class="info-label">Sheet</span>
               <el-tag size="small" type="info">{{ previewData.sheetName }}</el-tag>
             </div>
             <div class="info-item">
-              <el-icon><list /></el-icon>
+              <span class="info-icon">📈</span>
               <span class="info-label">总行数</span>
               <el-tag size="small" type="success">{{ previewData.totalRows }}</el-tag>
             </div>
             <div class="info-item">
-              <el-icon><view /></el-icon>
+              <span class="info-icon">👁</span>
               <span class="info-label">预览</span>
               <el-tag size="small" type="warning">前 {{ previewData.previewRows?.length || 0 }} 行</el-tag>
             </div>
@@ -51,7 +51,6 @@
           :max-height="420"
           style="width: 100%"
           :header-cell-style="{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff', fontWeight: '600' }"
-          :row-class-name="tableRowClassName"
         >
           <el-table-column
             v-for="(col, index) in previewData.columns"
@@ -81,8 +80,7 @@
     <div class="actions">
       <el-button @click="$emit('back')" size="large">上一步</el-button>
       <el-button type="primary" size="large" @click="handleNext" class="next-btn">
-        下一步
-        <el-icon class="el-icon--right"><arrow-right /></el-icon>
+        下一步 →
       </el-button>
     </div>
   </div>
@@ -92,20 +90,12 @@
 import { ref, onMounted, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import {
-  DataAnalysis, Loading, Document, Grid, List, View, ArrowRight
-} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next', 'back'])
 const uploadedFile = inject('uploadedFile')
 const previewData = inject('previewData')
 
 const loading = ref(false)
-
-const tableRowClassName = ({ rowIndex }) => {
-  if (rowIndex % 2 === 0) return 'even-row'
-  return 'odd-row'
-}
 
 const loadPreview = async () => {
   if (!uploadedFile.value?.filename) {
@@ -160,7 +150,6 @@ onMounted(() => {
 
 .preview-icon-bg {
   background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  color: #fff;
   box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
 }
 
@@ -208,8 +197,8 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.info-item .el-icon {
-  color: #667eea;
+.info-icon {
+  font-size: 14px;
 }
 
 .info-label {
@@ -260,17 +249,5 @@ onMounted(() => {
   padding: 0 40px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-}
-
-:deep(.even-row) {
-  background: #fafafa;
-}
-
-:deep(.odd-row) {
-  background: #fff;
-}
-
-:deep(.el-table--striped .el-table__body tr.el-table__row--striped td) {
-  background: #fafafa;
 }
 </style>

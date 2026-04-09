@@ -2,7 +2,7 @@
   <div class="db-selector">
     <div class="section-header">
       <div class="section-icon">
-        <el-icon><database /></el-icon>
+        <span class="icon-text">DB</span>
       </div>
       <div>
         <h2>选择目标数据库</h2>
@@ -20,7 +20,6 @@
       >
         <template #empty>
           <div class="empty-state">
-            <el-icon><warning /></el-icon>
             <span>暂无可用数据库</span>
           </div>
         </template>
@@ -49,11 +48,11 @@
         </template>
         <div class="db-details">
           <div class="detail-item">
-            <el-icon><location /></el-icon>
+            <span class="detail-icon">📍</span>
             <span>{{ selectedDbInfo?.host }}:{{ selectedDbInfo?.port }}</span>
           </div>
           <div class="detail-item">
-            <el-icon><user /></el-icon>
+            <span class="detail-icon">👤</span>
             <span>{{ selectedDbInfo?.username }}</span>
           </div>
         </div>
@@ -61,23 +60,13 @@
 
       <div class="test-section">
         <template v-if="connectionStatus === 'success'">
-          <el-result
-            icon="success"
-            title="连接成功"
-            class="connection-result"
-          />
+          <el-result icon="success" title="连接成功" class="connection-result" />
         </template>
         <template v-else-if="connectionStatus === 'failed'">
-          <el-result
-            icon="error"
-            title="连接失败"
-            :sub-title="connectionError"
-            class="connection-result"
-          />
+          <el-result icon="error" title="连接失败" :sub-title="connectionError" class="connection-result" />
         </template>
         <template v-else>
           <el-button type="primary" size="large" @click="testConnection" :loading="testing" class="test-btn">
-            <el-icon v-if="!testing"><connection /></el-icon>
             测试连接
           </el-button>
         </template>
@@ -92,8 +81,7 @@
         :disabled="!canProceed"
         class="next-btn"
       >
-        下一步
-        <el-icon class="el-icon--right"><arrow-right /></el-icon>
+        下一步 →
       </el-button>
     </div>
   </div>
@@ -103,9 +91,6 @@
 import { ref, computed, inject, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import {
-  Database, Warning, Location, User, Connection, ArrowRight
-} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next'])
 const selectedDb = inject('selectedDb')
@@ -182,9 +167,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 26px;
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.icon-text {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .section-header h2 {
@@ -263,6 +252,10 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.detail-icon {
+  font-size: 14px;
+}
+
 .test-section {
   margin: 24px 0;
 }
@@ -277,10 +270,6 @@ onMounted(() => {
   font-size: 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-}
-
-.test-btn:hover {
-  opacity: 0.9;
 }
 
 .actions {

@@ -2,7 +2,7 @@
   <div class="table-recommend">
     <div class="section-header">
       <div class="section-icon recommend-icon-bg">
-        <el-icon><magic-stick /></el-icon>
+        <span class="icon-text">✨</span>
       </div>
       <div>
         <h2>选择目标表</h2>
@@ -21,15 +21,13 @@
           <el-card shadow="hover" class="rec-card" :body-style="{ padding: '0px' }">
             <div class="rec-header">
               <div class="rec-badge">
-                <el-icon><star-filled /></el-icon>
-                <span>最佳推荐</span>
+                <span>⭐ 最佳推荐</span>
               </div>
               <el-tag type="success" class="score-tag">{{ recommendation.score }}% 匹配</el-tag>
             </div>
             <div class="rec-body">
               <div class="rec-table-name">
-                <el-icon><table /></el-icon>
-                <span>{{ recommendation.tableName }}</span>
+                <span>📋 {{ recommendation.tableName }}</span>
               </div>
               <div class="rec-stats">
                 <div class="stat-item">
@@ -128,8 +126,7 @@
 
       <div class="create-new">
         <el-button type="text" @click="showCreateDialog = true" class="create-btn">
-          <el-icon><plus /></el-icon>
-          创建新表（根据 Excel 自动推断列类型）
+          ➕ 创建新表（根据 Excel 自动推断列类型）
         </el-button>
       </div>
 
@@ -155,10 +152,10 @@
               <el-form-item label="导入模式">
                 <el-radio-group v-model="importMode" size="large">
                   <el-radio-button label="INCREMENTAL">
-                    <el-icon><plus /></el-icon> 增量导入
+                    ➕ 增量导入
                   </el-radio-button>
                   <el-radio-button label="TRUNCATE">
-                    <el-icon><delete /></el-icon> 清空导入
+                    🗑 清空导入
                   </el-radio-button>
                 </el-radio-group>
               </el-form-item>
@@ -168,16 +165,15 @@
                 label="主键冲突策略"
               >
                 <el-radio-group v-model="conflictStrategy" size="large">
-                  <el-radio-button label="ERROR">报错</el-radio-button>
-                  <el-radio-button label="UPDATE">更新 (UPSERT)</el-radio-button>
-                  <el-radio-button label="IGNORE">忽略</el-radio-button>
+                  <el-radio-button label="ERROR">❌ 报错</el-radio-button>
+                  <el-radio-button label="UPDATE">🔄 更新</el-radio-button>
+                  <el-radio-button label="IGNORE">⏭ 忽略</el-radio-button>
                 </el-radio-group>
               </el-form-item>
 
               <el-form-item>
                 <el-button type="primary" @click="confirmImport" size="large" class="import-btn">
-                  开始导入
-                  <el-icon class="el-icon--right"><arrow-right /></el-icon>
+                  开始导入 →
                 </el-button>
               </el-form-item>
             </el-form>
@@ -188,7 +184,7 @@
 
     <el-dialog v-model="showCreateDialog" title="创建新表" width="450px" center>
       <div class="create-dialog-content">
-        <el-icon class="create-dialog-icon"><circle-plus /></el-icon>
+        <span class="create-dialog-icon">➕</span>
         <p>系统将根据 Excel 列名和数据类型自动创建新表</p>
         <el-form label-width="80px">
           <el-form-item label="表名">
@@ -212,10 +208,6 @@
 import { ref, onMounted, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import {
-  MagicStick, Loading, StarFilled, Table, Plus, Delete,
-  CirclePlus, ArrowRight
-} from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next', 'back'])
 const selectedDb = inject('selectedDb')
@@ -344,7 +336,6 @@ onMounted(() => {
 
 .recommend-icon-bg {
   background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-  color: #fff;
   box-shadow: 0 4px 15px rgba(250, 112, 154, 0.4);
 }
 
@@ -407,9 +398,6 @@ onMounted(() => {
 }
 
 .rec-table-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   font-size: 18px;
   font-weight: 600;
   color: #303133;
