@@ -27,7 +27,7 @@ logging:
     org.springframework: INFO
 
 app:
-  config-file: ../config.yaml
+  config-file: config.yaml
   upload:
     temp-path: ./uploads
   import:

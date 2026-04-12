@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.yaml.snakeyaml.Yaml;
 
 import jakarta.annotation.PostConstruct;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
@@ -28,23 +29,36 @@ public class AppConfig {
     public void loadConfig() {
         try {
             Yaml yaml = new Yaml();
-            InputStream inputStream = new FileInputStream(configFile);
+            InputStream inputStream;
+            if (configFile != null && configFile.startsWith("/")) {
+                // Absolute path
+                inputStream = new FileInputStream(configFile);
+            } else {
+                // Classpath resource
+                inputStream = getClass().getClassLoader().getResourceAsStream(configFile);
+                if (inputStream == null) {
+                    // Fallback to current directory
+                    inputStream = new FileInputStream(configFile);
+                }
+            }
             Map<String, Object> config = yaml.load(inputStream);
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> databasesConfig = (Map<String, Object>) config.get("databases");
-            if (databasesConfig != null) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> dbList = (List<Map<String, Object>>) databasesConfig.get("databases");
-                if (dbList != null) {
-                    databases = dbList.stream().map(this::mapToDatabaseInfo).toList();
-                }
+            List<Map<String, Object>> dbList = (List<Map<String, Object>>) config.get("databases");
+            if (dbList != null) {
+                databases = dbList.stream().map(this::mapToDatabaseInfo).toList();
             }
 
             @SuppressWarnings("unchecked")
             Map<String, Object> uploadConfig = (Map<String, Object>) config.get("upload");
             if (uploadConfig != null) {
-                uploadTempPath = (String) uploadConfig.getOrDefault("tempPath", uploadTempPath);
+                String tempPath = (String) uploadConfig.getOrDefault("tempPath", uploadTempPath);
+                // Convert relative path to absolute path
+                if (!new File(tempPath).isAbsolute()) {
+                    uploadTempPath = new File(tempPath).getAbsolutePath();
+                } else {
+                    uploadTempPath = tempPath;
+                }
             }
 
             @SuppressWarnings("unchecked")
@@ -59,13 +73,14 @@ public class AppConfig {
 
     private DatabaseInfo mapToDatabaseInfo(Map<String, Object> map) {
         DatabaseInfo db = new DatabaseInfo();
-        db.setId((String) map.get("id"));
-        db.setName((String) map.get("name"));
-        db.setHost((String) map.get("host"));
-        db.setPort((Integer) map.get("port"));
-        db.setUsername((String) map.get("username"));
-        db.setPassword((String) map.get("password"));
-        db.setDatabase((String) map.get("database"));
+        db.setId(String.valueOf(map.get("id")));
+        db.setName(String.valueOf(map.get("name")));
+        db.setHost(String.valueOf(map.get("host")));
+        Object port = map.get("port");
+        db.setPort(port instanceof Integer ? (Integer) port : Integer.parseInt(String.valueOf(port)));
+        db.setUsername(String.valueOf(map.get("username")));
+        db.setPassword(String.valueOf(map.get("password")));
+        db.setDatabase(String.valueOf(map.get("database")));
         return db;
     }
 

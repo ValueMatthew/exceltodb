@@ -6,7 +6,8 @@ import com.exceltodb.model.PreviewResult;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -53,13 +54,13 @@ public class ExcelParserService {
             } else {
                 throw new RuntimeException("不支持的文件格式: " + originalFilename);
             }
-        } catch (IOException e) {
+        } catch (IOException | InvalidFormatException e) {
             throw new RuntimeException("文件保存失败: " + e.getMessage(), e);
         }
     }
 
-    private ParseResult parseExcel(Path filePath, String filename) throws IOException {
-        try (Workbook workbook = new XSSFWorkbook(filePath.toFile())) {
+    private ParseResult parseExcel(Path filePath, String filename) throws IOException, InvalidFormatException {
+        try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
             Sheet sheet = workbook.getSheetAt(0);
             Row headerRow = sheet.getRow(0);
 
@@ -108,7 +109,7 @@ public class ExcelParserService {
         }
     }
 
-    public PreviewResult getPreview(String filename, int maxRows) {
+    public PreviewResult getPreview(String filename, int maxRows) throws IOException, InvalidFormatException {
         Path filePath = uploadedFiles.get(filename);
         if (filePath == null) {
             throw new RuntimeException("文件不存在或已过期: " + filename);
@@ -124,8 +125,8 @@ public class ExcelParserService {
         }
     }
 
-    private PreviewResult getExcelPreview(Path filePath, String filename, int maxRows) throws IOException {
-        try (Workbook workbook = new XSSFWorkbook(filePath.toFile())) {
+    private PreviewResult getExcelPreview(Path filePath, String filename, int maxRows) throws IOException, InvalidFormatException {
+        try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
             Sheet sheet = workbook.getSheetAt(0);
             Row headerRow = sheet.getRow(0);
 
@@ -227,7 +228,7 @@ public class ExcelParserService {
         };
     }
 
-    public List<String[]> readAllData(String filename) throws IOException {
+    public List<String[]> readAllData(String filename) throws IOException, InvalidFormatException {
         Path filePath = uploadedFiles.get(filename);
         if (filePath == null) {
             throw new RuntimeException("文件不存在: " + filename);
@@ -243,10 +244,10 @@ public class ExcelParserService {
         }
     }
 
-    private List<String[]> readExcelAllData(Path filePath) throws IOException {
+    private List<String[]> readExcelAllData(Path filePath) throws IOException, InvalidFormatException {
         List<String[]> data = new ArrayList<>();
 
-        try (Workbook workbook = new XSSFWorkbook(filePath.toFile())) {
+        try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
             Sheet sheet = workbook.getSheetAt(0);
             Row headerRow = sheet.getRow(0);
             if (headerRow == null) return data;

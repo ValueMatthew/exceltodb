@@ -9,4 +9,6 @@ public class TableInfo {
     private int columnCount;
     private String primaryKey;
     private List<String> columns;
+    // Columns excluded from matching: PK and columns with default values (e.g. CURRENT_TIMESTAMP)
+    private List<String> excludedColumns;
 }

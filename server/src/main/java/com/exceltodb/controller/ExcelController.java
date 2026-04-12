@@ -49,6 +49,8 @@ public class ExcelController {
             ParseResult result = excelParserService.parseAndSave(file);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
+            System.err.println("Upload error: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
             return ResponseEntity.badRequest().build();
         }
     }
@@ -83,8 +85,10 @@ public class ExcelController {
             TableRecommendation recommendation = tableMatcherService.findBestMatch(
                     tables, preview.getColumns(), request.getFilename());
 
+            // Always return recommendation with score (may be 0)
             if (recommendation == null) {
-                return ResponseEntity.ok().build();
+                recommendation = new TableRecommendation();
+                recommendation.setScore(0);
             }
 
             return ResponseEntity.ok(recommendation);

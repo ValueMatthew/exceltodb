@@ -26,7 +26,7 @@
       <div class="content-card">
         <transition name="fade-slide" mode="out-in">
           <DbSelector v-if="currentStep === 0" @next="handleDbNext" />
-          <FileUpload v-else-if="currentStep === 1" @next="handleUploadNext" />
+          <FileUpload v-else-if="currentStep === 1" @next="handleUploadNext" @back="currentStep--" />
           <DataPreview v-else-if="currentStep === 2" @next="handlePreviewNext" @back="currentStep--" />
           <TableRecommend v-else-if="currentStep === 3" @next="handleTableNext" @back="currentStep--" />
           <ImportProgress v-else-if="currentStep === 4" :params="importParams" @reset="handleReset" @back="currentStep = 3" />

@@ -6,10 +6,12 @@ import com.exceltodb.model.CreateTableRequest;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
 import com.exceltodb.model.TableInfo;
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.sql.DataSource;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -32,7 +34,7 @@ public class ImportService {
         this.appConfig = appConfig;
     }
 
-    public ImportResult importData(ImportRequest request) {
+    public ImportResult importData(ImportRequest request) throws IOException, InvalidFormatException {
         ImportResult result = new ImportResult();
 
         DataSource ds = dataSourceConfig.getDataSource(request.getDatabaseId());
@@ -58,11 +60,15 @@ public class ImportService {
                 List<String[]> dataRows = allData.subList(1, allData.size());
 
                 // Determine conflict strategy
-                String conflictAction = getConflictAction(request);
+                String conflictAction = getConflictAction(request, headers);
 
                 // Build INSERT SQL
                 StringBuilder sqlBuilder = new StringBuilder();
-                sqlBuilder.append("INSERT INTO `").append(request.getTableName()).append("` (");
+                sqlBuilder.append("INSERT ");
+                if ("IGNORE".equals(request.getConflictStrategy())) {
+                    sqlBuilder.append("IGNORE ");
+                }
+                sqlBuilder.append("INTO `").append(request.getTableName()).append("` (");
                 for (int i = 0; i < headers.length; i++) {
                     sqlBuilder.append("`").append(headers[i]).append("`");
                     if (i < headers.length - 1) sqlBuilder.append(", ");
@@ -78,7 +84,6 @@ public class ImportService {
                 String sql = sqlBuilder.toString();
 
                 try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                    int batchSize = appConfig.getBatchSize();
                     int totalRows = dataRows.size();
                     int importedRows = 0;
 
@@ -94,24 +99,20 @@ public class ImportService {
                             pstmt.setObject(j + 1, convertValue(row[j]));
                         }
 
-                        pstmt.addBatch();
-
-                        if ((i + 1) % batchSize == 0 || i == totalRows - 1) {
-                            try {
-                                int[] results = pstmt.executeBatch();
-                                importedRows += results.length;
-                            } catch (BatchUpdateException e) {
-                                // Handle partial batch failure
-                                int[] updateCounts = e.getUpdateCounts();
-                                for (int updateCount : updateCounts) {
-                                    if (updateCount >= 0) {
-                                        importedRows++;
-                                    } else if (updateCount == Statement.SUCCESS_NO_INFO) {
-                                        importedRows++;
-                                    }
-                                }
+                        try {
+                            int affected = pstmt.executeUpdate();
+                            // Count rows that were actually inserted or updated (affected >= 1)
+                            // UPSERT: 1=inserted, 2=updated; IGNORE: 0=ignored, 1=inserted
+                            if (affected >= 1) {
+                                importedRows++;
                             }
-                            pstmt.clearBatch();
+                        } catch (SQLException e) {
+                            // Primary key conflict or other SQL error
+                            // Rollback entire transaction on first error for ERROR strategy
+                            if ("ERROR".equals(request.getConflictStrategy())) {
+                                throw new RuntimeException("第 " + (i + 1) + " 行导入失败: " + e.getMessage(), e);
+                            }
+                            // For UPSERT/IGNORE, errors are already handled by the SQL clause
                         }
                     }
 
@@ -135,11 +136,17 @@ public class ImportService {
         return result;
     }
 
-    private String getConflictAction(ImportRequest request) {
+    private String getConflictAction(ImportRequest request, String[] headers) {
         String strategy = request.getConflictStrategy();
 
         if ("UPDATE".equals(strategy)) {
-            return " ON DUPLICATE KEY UPDATE ";
+            // Build ON DUPLICATE KEY UPDATE clause with all columns
+            StringBuilder sb = new StringBuilder(" ON DUPLICATE KEY UPDATE ");
+            for (int i = 0; i < headers.length; i++) {
+                sb.append("`").append(headers[i]).append("`=VALUES(`").append(headers[i]).append("`)");
+                if (i < headers.length - 1) sb.append(", ");
+            }
+            return sb.toString();
         } else if ("IGNORE".equals(strategy)) {
             return "";
         } else {
@@ -180,7 +187,7 @@ public class ImportService {
         return value;
     }
 
-    public String createTable(CreateTableRequest request) {
+    public String createTable(CreateTableRequest request) throws IOException, InvalidFormatException {
         DataSource ds = dataSourceConfig.getDataSource(request.getDatabaseId());
 
         try (Connection conn = ds.getConnection()) {

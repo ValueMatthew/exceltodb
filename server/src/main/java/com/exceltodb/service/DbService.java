@@ -38,27 +38,56 @@ public class DbService {
 
         try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
             DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
 
             String[] types = {"TABLE"};
-            try (ResultSet rs = metaData.getTables(null, null, "%", types)) {
+            try (ResultSet rs = metaData.getTables(catalog, null, "%", types)) {
                 while (rs.next()) {
                     String tableName = rs.getString("TABLE_NAME");
                     TableInfo tableInfo = new TableInfo();
                     tableInfo.setName(tableName);
 
-                    // Get columns
+                    // Get columns and primary key
                     List<String> columns = new ArrayList<>();
-                    String primaryKey = getPrimaryKey(metaData, tableName);
+                    List<String> excludedColumns = new ArrayList<>();
+                    String primaryKey = getPrimaryKey(metaData, catalog, tableName);
 
-                    try (ResultSet colRs = metaData.getColumns(null, null, tableName, null)) {
+                    // Get column details
+                    try (ResultSet colRs = metaData.getColumns(catalog, null, tableName, null)) {
                         while (colRs.next()) {
-                            columns.add(colRs.getString("COLUMN_NAME"));
+                            String colName = colRs.getString("COLUMN_NAME");
+                            columns.add(colName);
+                        }
+                    }
+
+                    // Query INFORMATION_SCHEMA for columns with default values or ON UPDATE
+                    // Only these columns are excluded from matching (NOT primary keys)
+                    String schemaName = conn.getCatalog();
+                    String excludedColsSql = "SELECT COLUMN_NAME, COLUMN_DEFAULT, LOWER(EXTRA) as EXTRA_LOWER FROM INFORMATION_SCHEMA.COLUMNS " +
+                            "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+                            "AND (COLUMN_DEFAULT IS NOT NULL AND COLUMN_DEFAULT != '' " +
+                            "     OR LOWER(EXTRA) LIKE '%on update%')";
+                    try (PreparedStatement pstmt = conn.prepareStatement(excludedColsSql)) {
+                        pstmt.setString(1, schemaName);
+                        pstmt.setString(2, tableName);
+                        try (ResultSet exRs = pstmt.executeQuery()) {
+                            while (exRs.next()) {
+                                String colName = exRs.getString("COLUMN_NAME");
+                                String defaultVal = exRs.getString("COLUMN_DEFAULT");
+                                String extraLower = exRs.getString("EXTRA_LOWER");
+                                boolean hasDefault = defaultVal != null && !defaultVal.trim().isEmpty();
+                                boolean hasOnUpdate = extraLower != null && extraLower.contains("on update");
+                                if ((hasDefault || hasOnUpdate) && !excludedColumns.contains(colName)) {
+                                    excludedColumns.add(colName);
+                                }
+                            }
                         }
                     }
 
                     tableInfo.setColumnCount(columns.size());
                     tableInfo.setColumns(columns);
                     tableInfo.setPrimaryKey(primaryKey);
+                    tableInfo.setExcludedColumns(excludedColumns);
 
                     tables.add(tableInfo);
                 }
@@ -70,8 +99,8 @@ public class DbService {
         return tables;
     }
 
-    private String getPrimaryKey(DatabaseMetaData metaData, String tableName) throws SQLException {
-        try (ResultSet rs = metaData.getPrimaryKeys(null, null, tableName)) {
+    private String getPrimaryKey(DatabaseMetaData metaData, String catalog, String tableName) throws SQLException {
+        try (ResultSet rs = metaData.getPrimaryKeys(catalog, null, tableName)) {
             if (rs.next()) {
                 return rs.getString("COLUMN_NAME");
             }
@@ -85,10 +114,11 @@ public class DbService {
 
         try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
             DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
 
-            String primaryKey = getPrimaryKey(metaData, tableName);
+            String primaryKey = getPrimaryKey(metaData, catalog, tableName);
 
-            try (ResultSet colRs = metaData.getColumns(null, null, tableName, null)) {
+            try (ResultSet colRs = metaData.getColumns(catalog, null, tableName, null)) {
                 while (colRs.next()) {
                     columns.add(colRs.getString("COLUMN_NAME"));
                 }

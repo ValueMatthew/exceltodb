@@ -6,7 +6,7 @@
       </div>
       <div>
         <h2>选择目标表</h2>
-        <p class="subtitle">系统会根据 Excel 列名智能推荐最匹配的数据表</p>
+        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度最高的数据表</p>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
 
     <div v-else class="recommend-content">
       <transition name="el-fade-in">
-        <div v-if="recommendation" class="recommendation-card">
+        <div v-if="recommendation && recommendation.score >= 90" class="recommendation-card">
           <el-card shadow="hover" class="rec-card" :body-style="{ padding: '0px' }">
             <div class="rec-header">
               <div class="rec-badge">
@@ -67,68 +67,18 @@
       </transition>
 
       <transition name="el-fade-in">
-        <div v-if="!recommendation && !loading" class="no-match">
-          <el-alert type="warning" :closable="false" show-icon class="no-match-alert">
-            <template #title>
-              <span>
-                未找到合适的匹配表 (最高匹配度 {{ topScore }}% < 30%)
-              </span>
-            </template>
-            <template #description>
-              您可以选择其他表或创建新表
-            </template>
+        <div v-if="(!recommendation || recommendation.score < 90) && !loading" class="no-match">
+          <el-alert
+            type="warning"
+            :closable="false"
+            show-icon
+            class="no-match-alert"
+            :title="'未找到合适的匹配表 (最高匹配度 ' + topScore + '% < 90%)'"
+          >
+            请检查导入文件是否正确，或联系IT团队创建对应的数据表后再试
           </el-alert>
         </div>
       </transition>
-
-      <div class="other-tables">
-        <div class="divider-with-text">
-          <el-divider />
-          <span class="divider-text">或选择其他表</span>
-          <el-divider />
-        </div>
-
-        <el-select
-          v-model="selectedTableName"
-          placeholder="请选择表"
-          size="large"
-          filterable
-          clearable
-          class="table-select"
-        >
-          <template #empty>
-            <span class="empty-text">暂无可用表</span>
-          </template>
-          <el-option
-            v-for="table in allTables"
-            :key="table.name"
-            :label="table.name"
-            :value="table.name"
-            class="table-option"
-          >
-            <div class="table-option-content">
-              <span class="table-name">{{ table.name }}</span>
-              <span class="table-meta">{{ table.columnCount }} 列</span>
-            </div>
-          </el-option>
-        </el-select>
-
-        <el-button
-          v-if="selectedTableName"
-          type="primary"
-          plain
-          @click="selectTableByName"
-          class="confirm-select-btn"
-        >
-          确认选择
-        </el-button>
-      </div>
-
-      <div class="create-new">
-        <el-button type="text" @click="showCreateDialog = true" class="create-btn">
-          ➕ 创建新表（根据 Excel 自动推断列类型）
-        </el-button>
-      </div>
 
       <transition name="el-fade-in">
         <div v-if="selectedTableInfo" class="import-options">
@@ -182,22 +132,6 @@
       </transition>
     </div>
 
-    <el-dialog v-model="showCreateDialog" title="创建新表" width="450px" center>
-      <div class="create-dialog-content">
-        <span class="create-dialog-icon">➕</span>
-        <p>系统将根据 Excel 列名和数据类型自动创建新表</p>
-        <el-form label-width="80px">
-          <el-form-item label="表名">
-            <el-input v-model="newTableName" placeholder="请输入新表名" size="large" />
-          </el-form-item>
-        </el-form>
-      </div>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="createTable">创建</el-button>
-      </template>
-    </el-dialog>
-
     <div class="actions">
       <el-button @click="$emit('back')" size="large">上一步</el-button>
     </div>
@@ -218,29 +152,21 @@ const selectedTable = inject('selectedTable')
 const loading = ref(false)
 const recommendation = ref(null)
 const topScore = ref(0)
-const allTables = ref([])
-const selectedTableName = ref('')
 const selectedTableInfo = ref(null)
 const importMode = ref('INCREMENTAL')
 const conflictStrategy = ref('ERROR')
-const showCreateDialog = ref(false)
-const newTableName = ref('')
 
-const loadTables = async () => {
+const loadRecommendation = async () => {
   if (!selectedDb.value?.id) return
 
   loading.value = true
   try {
-    const [tablesRes, recommendRes] = await Promise.all([
-      axios.get(`/api/tables/${selectedDb.value.id}`),
-      axios.post('/api/recommend', {
-        databaseId: selectedDb.value.id,
-        filename: uploadedFile.value?.filename,
-        columns: previewData.value?.columns || []
-      })
-    ])
+    const recommendRes = await axios.post('/api/recommend', {
+      databaseId: selectedDb.value.id,
+      filename: uploadedFile.value?.filename,
+      columns: previewData.value?.columns || []
+    })
 
-    allTables.value = tablesRes.data
     if (recommendRes.data) {
       recommendation.value = recommendRes.data
       topScore.value = recommendRes.data.score || 0
@@ -261,40 +187,6 @@ const selectTable = (table) => {
   selectedTable.value = selectedTableInfo.value
 }
 
-const selectTableByName = async () => {
-  const table = allTables.value.find(t => t.name === selectedTableName.value)
-  if (table) {
-    selectedTableInfo.value = {
-      name: table.name,
-      primaryKey: table.primaryKey,
-      columns: table.columns
-    }
-  }
-}
-
-const createTable = async () => {
-  if (!newTableName.value) {
-    ElMessage.warning('请输入表名')
-    return
-  }
-
-  try {
-    await axios.post('/api/create-table', {
-      databaseId: selectedDb.value.id,
-      tableName: newTableName.value,
-      columns: previewData.value?.columns || [],
-      filename: uploadedFile.value?.filename
-    })
-    ElMessage.success('建表成功')
-    showCreateDialog.value = false
-    await loadTables()
-    selectedTableName.value = newTableName.value
-    await selectTableByName()
-  } catch (err) {
-    ElMessage.error(err.response?.data?.message || '建表失败')
-  }
-}
-
 const confirmImport = () => {
   selectedTable.value = {
     ...selectedTableInfo.value,
@@ -305,7 +197,7 @@ const confirmImport = () => {
 }
 
 onMounted(() => {
-  loadTables()
+  loadRecommendation()
 })
 </script>
 
@@ -467,66 +359,6 @@ onMounted(() => {
   border-radius: 12px;
 }
 
-.other-tables {
-  margin: 24px 0;
-}
-
-.divider-with-text {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.divider-with-text .el-divider {
-  flex: 1;
-  margin: 0;
-}
-
-.divider-text {
-  color: #909399;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.table-select {
-  width: 100%;
-  margin-bottom: 12px;
-}
-
-.table-option-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.table-name {
-  font-weight: 500;
-}
-
-.table-meta {
-  font-size: 12px;
-  color: #909399;
-}
-
-.confirm-select-btn {
-  width: 100%;
-}
-
-.create-new {
-  text-align: center;
-  margin: 24px 0;
-}
-
-.create-btn {
-  color: #667eea;
-  font-size: 14px;
-}
-
-.create-btn:hover {
-  color: #764ba2;
-}
-
 .import-options {
   margin-top: 24px;
 }
@@ -563,26 +395,6 @@ onMounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
   font-size: 16px;
-}
-
-.create-dialog-content {
-  text-align: center;
-  padding: 20px 0;
-}
-
-.create-dialog-icon {
-  font-size: 48px;
-  color: #667eea;
-  margin-bottom: 16px;
-}
-
-.create-dialog-content p {
-  color: #606266;
-  margin-bottom: 20px;
-}
-
-.empty-text {
-  color: #909399;
 }
 
 .actions {
