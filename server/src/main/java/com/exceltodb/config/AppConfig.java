@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -53,12 +54,7 @@ public class AppConfig {
             Map<String, Object> uploadConfig = (Map<String, Object>) config.get("upload");
             if (uploadConfig != null) {
                 String tempPath = (String) uploadConfig.getOrDefault("tempPath", uploadTempPath);
-                // Convert relative path to absolute path
-                if (!new File(tempPath).isAbsolute()) {
-                    uploadTempPath = new File(tempPath).getAbsolutePath();
-                } else {
-                    uploadTempPath = tempPath;
-                }
+                uploadTempPath = tempPath;
             }
 
             @SuppressWarnings("unchecked")
@@ -66,6 +62,13 @@ public class AppConfig {
             if (importConfig != null) {
                 batchSize = (Integer) importConfig.getOrDefault("batchSize", batchSize);
             }
+
+            // Always resolve upload dir to an absolute, normalized path to avoid Tomcat-relative issues.
+            Path uploadPath = Path.of(uploadTempPath);
+            if (!uploadPath.isAbsolute()) {
+                uploadPath = uploadPath.toAbsolutePath();
+            }
+            uploadTempPath = uploadPath.normalize().toString();
         } catch (FileNotFoundException e) {
             throw new RuntimeException("配置文件不存在: " + configFile, e);
         }

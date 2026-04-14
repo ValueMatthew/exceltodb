@@ -12,6 +12,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,15 +40,16 @@ public class ExcelParserService {
                 throw new RuntimeException("文件名为空");
             }
 
-            // Save file to temp directory
-            Path uploadDir = Paths.get(appConfig.getUploadTempPath());
-            if (!Files.exists(uploadDir)) {
-                Files.createDirectories(uploadDir);
-            }
+            // Save file to temp directory (always use absolute + normalized path)
+            Path uploadDir = Paths.get(appConfig.getUploadTempPath()).toAbsolutePath().normalize();
+            Files.createDirectories(uploadDir);
 
-            String uniqueFilename = System.currentTimeMillis() + "_" + originalFilename;
-            Path filePath = uploadDir.resolve(uniqueFilename);
-            file.transferTo(filePath.toFile());
+            // Prevent odd path behavior if filename contains separators
+            String safeOriginalName = Paths.get(originalFilename).getFileName().toString();
+            String uniqueFilename = System.currentTimeMillis() + "_" + safeOriginalName;
+            Path filePath = uploadDir.resolve(uniqueFilename).toAbsolutePath().normalize();
+            Files.createDirectories(filePath.getParent());
+            file.transferTo(filePath);
             uploadedFiles.put(uniqueFilename, filePath);
 
             // Parse based on extension
@@ -90,7 +97,7 @@ public class ExcelParserService {
     }
 
     private ParseResult parseCsv(Path filePath, String filename) throws IOException {
-        try (CSVReader reader = new CSVReader(new FileReader(filePath.toFile()))) {
+        try (CSVReader reader = createCsvReader(filePath)) {
             List<String[]> allLines = reader.readAll();
 
             if (allLines.isEmpty()) {
@@ -100,7 +107,9 @@ public class ExcelParserService {
             ParseResult result = new ParseResult();
             result.setFilename(filename);
             result.setRowCount(allLines.size() - 1); // exclude header
-            result.setColumns(Arrays.asList(allLines.get(0)));
+            String[] header = allLines.get(0);
+            stripBomInPlace(header);
+            result.setColumns(Arrays.asList(header));
             result.setSheetName("Sheet1");
 
             return result;
@@ -166,7 +175,7 @@ public class ExcelParserService {
     }
 
     private PreviewResult getCsvPreview(Path filePath, String filename, int maxRows) throws IOException {
-        try (CSVReader reader = new CSVReader(new FileReader(filePath.toFile()))) {
+        try (CSVReader reader = createCsvReader(filePath)) {
             List<String[]> allLines = reader.readAll();
 
             PreviewResult result = new PreviewResult();
@@ -178,7 +187,9 @@ public class ExcelParserService {
                 return result;
             }
 
-            result.setColumns(Arrays.asList(allLines.get(0)));
+            String[] header = allLines.get(0);
+            stripBomInPlace(header);
+            result.setColumns(Arrays.asList(header));
 
             List<Map<String, Object>> previewRows = new ArrayList<>();
             int rowCount = Math.min(maxRows, allLines.size() - 1);
@@ -271,11 +282,82 @@ public class ExcelParserService {
     }
 
     private List<String[]> readCsvAllData(Path filePath) throws IOException {
-        try (CSVReader reader = new CSVReader(new FileReader(filePath.toFile()))) {
-            return reader.readAll();
+        try (CSVReader reader = createCsvReader(filePath)) {
+            List<String[]> all = reader.readAll();
+            if (!all.isEmpty()) {
+                stripBomInPlace(all.get(0));
+            }
+            return all;
         } catch (CsvException e) {
             throw new RuntimeException("CSV解析失败: " + e.getMessage(), e);
         }
+    }
+
+    private CSVReader createCsvReader(Path filePath) throws IOException {
+        Charset charset = detectTextCharset(filePath);
+        return new CSVReader(new BufferedReader(new InputStreamReader(Files.newInputStream(filePath), charset)));
+    }
+
+    /**
+     * Detect common encodings for CSV/text files.
+     * - UTF-8 BOM -> UTF-8
+     * - UTF-16 BOM -> UTF-16
+     * - Valid UTF-8 -> UTF-8
+     * - Otherwise -> GBK (common for Windows-exported CSV with Chinese)
+     */
+    private Charset detectTextCharset(Path filePath) throws IOException {
+        byte[] sample = readSampleBytes(filePath, 8192);
+        if (sample.length >= 3
+                && (sample[0] & 0xFF) == 0xEF
+                && (sample[1] & 0xFF) == 0xBB
+                && (sample[2] & 0xFF) == 0xBF) {
+            return StandardCharsets.UTF_8;
+        }
+        if (sample.length >= 2) {
+            int b0 = sample[0] & 0xFF;
+            int b1 = sample[1] & 0xFF;
+            if (b0 == 0xFE && b1 == 0xFF) {
+                return StandardCharsets.UTF_16BE;
+            }
+            if (b0 == 0xFF && b1 == 0xFE) {
+                return StandardCharsets.UTF_16LE;
+            }
+        }
+        if (isValidUtf8(sample)) {
+            return StandardCharsets.UTF_8;
+        }
+        return Charset.forName("GBK");
+    }
+
+    private byte[] readSampleBytes(Path filePath, int maxBytes) throws IOException {
+        try (InputStream in = Files.newInputStream(filePath)) {
+            return in.readNBytes(maxBytes);
+        }
+    }
+
+    private boolean isValidUtf8(byte[] bytes) {
+        var decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        try {
+            CharBuffer ignored = decoder.decode(ByteBuffer.wrap(bytes));
+            return true;
+        } catch (CharacterCodingException e) {
+            return false;
+        }
+    }
+
+    private void stripBomInPlace(String[] row) {
+        if (row == null || row.length == 0 || row[0] == null) return;
+        row[0] = stripBom(row[0]);
+    }
+
+    private String stripBom(String s) {
+        if (s == null || s.isEmpty()) return s;
+        if (!s.isEmpty() && s.charAt(0) == '\uFEFF') {
+            return s.substring(1);
+        }
+        return s;
     }
 
     public Path getFilePath(String filename) {
