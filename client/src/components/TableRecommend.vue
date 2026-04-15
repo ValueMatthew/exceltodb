@@ -6,7 +6,7 @@
       </div>
       <div>
         <h2>选择目标表</h2>
-        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度最高的数据表</p>
+        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度 ≥ 90% 的数据表</p>
       </div>
     </div>
 
@@ -17,48 +17,43 @@
 
     <div v-else class="recommend-content">
       <transition name="el-fade-in">
-        <div v-if="recommendation && recommendation.score >= 90" class="recommendation-card">
+        <div v-if="recommendations.length > 0" class="recommendation-list">
           <el-card shadow="hover" class="rec-card" :body-style="{ padding: '0px' }">
             <div class="rec-header">
               <div class="rec-badge">
-                <span>⭐ 最佳推荐</span>
+                <span>⭐ 推荐列表</span>
               </div>
-              <el-tag type="success" class="score-tag">{{ recommendation.score }}% 匹配</el-tag>
+              <el-tag type="success" class="score-tag">最高 {{ topScore }}%</el-tag>
             </div>
+
             <div class="rec-body">
-              <div class="rec-table-name">
-                <span>📋 {{ recommendation.tableName }}</span>
-              </div>
-              <div class="rec-stats">
-                <div class="stat-item">
-                  <span class="stat-value">{{ recommendation.columnCount }}</span>
-                  <span class="stat-label">列数</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value">{{ recommendation.primaryKey || '-' }}</span>
-                  <span class="stat-label">主键</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value">{{ recommendation.matchedColumns?.length || 0 }}</span>
-                  <span class="stat-label">匹配列</span>
-                </div>
-              </div>
-              <div class="matched-columns">
-                <span class="match-label">匹配列：</span>
-                <el-tag
-                  v-for="col in recommendation.matchedColumns"
-                  :key="col"
-                  size="small"
-                  type="success"
-                  effect="plain"
-                  class="match-tag"
+              <el-radio-group v-model="selectedTableName" class="rec-radio-group">
+                <div
+                  v-for="(rec, idx) in recommendations"
+                  :key="rec.tableName"
+                  class="rec-item"
                 >
-                  {{ col }}
-                </el-tag>
-              </div>
+                  <el-radio :label="rec.tableName">
+                    <span class="rec-item-title">
+                      <span class="rec-rank">{{ idx + 1 }}</span>
+                      <span class="rec-name">📋 {{ rec.tableName }}</span>
+                    </span>
+                  </el-radio>
+                  <div class="rec-item-meta">
+                    <el-tag type="success" size="small" effect="plain">{{ rec.score }}% 匹配</el-tag>
+                    <el-tag v-if="isBackupLike(rec.tableName)" type="warning" size="small" effect="plain">
+                      可能是备份表
+                    </el-tag>
+                    <span class="meta-text">列数 {{ rec.columnCount }}</span>
+                    <span class="meta-text">主键 {{ rec.primaryKey || '-' }}</span>
+                    <span class="meta-text">匹配列 {{ rec.matchedColumns?.length || 0 }}</span>
+                  </div>
+                </div>
+              </el-radio-group>
             </div>
+
             <div class="rec-footer">
-              <el-button type="primary" @click="selectTable(recommendation)" class="select-btn">
+              <el-button type="primary" @click="selectChosenTable" class="select-btn">
                 选择此表
               </el-button>
             </div>
@@ -67,7 +62,7 @@
       </transition>
 
       <transition name="el-fade-in">
-        <div v-if="(!recommendation || recommendation.score < 90) && !loading" class="no-match">
+        <div v-if="recommendations.length === 0 && !loading" class="no-match">
           <el-alert
             type="warning"
             :closable="false"
@@ -150,11 +145,19 @@ const previewData = inject('previewData')
 const selectedTable = inject('selectedTable')
 
 const loading = ref(false)
-const recommendation = ref(null)
+const recommendations = ref([])
 const topScore = ref(0)
 const selectedTableInfo = ref(null)
+const selectedTableName = ref('')
 const importMode = ref('INCREMENTAL')
 const conflictStrategy = ref('ERROR')
+
+const backupKeywords = ['test', 'bak', 'back', 'full']
+const isBackupLike = (tableName) => {
+  if (!tableName) return false
+  const lower = String(tableName).toLowerCase()
+  return backupKeywords.some(k => lower.includes(k))
+}
 
 const loadRecommendation = async () => {
   if (!selectedDb.value?.id) return
@@ -168,8 +171,13 @@ const loadRecommendation = async () => {
     })
 
     if (recommendRes.data) {
-      recommendation.value = recommendRes.data
-      topScore.value = recommendRes.data.score || 0
+      recommendations.value = recommendRes.data.recommendations || []
+      topScore.value = recommendRes.data.topScore || 0
+      if (recommendations.value.length > 0) {
+        selectedTableName.value = recommendations.value[0].tableName
+      } else {
+        selectedTableName.value = ''
+      }
     }
   } catch (err) {
     ElMessage.error('加载表信息失败')
@@ -185,6 +193,15 @@ const selectTable = (table) => {
     columns: table.columns
   }
   selectedTable.value = selectedTableInfo.value
+}
+
+const selectChosenTable = () => {
+  const chosen = recommendations.value.find(r => r.tableName === selectedTableName.value)
+  if (!chosen) {
+    ElMessage.warning('请选择一个目标表')
+    return
+  }
+  selectTable(chosen)
 }
 
 const confirmImport = () => {
@@ -205,6 +222,64 @@ onMounted(() => {
 .table-recommend {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.recommendation-list {
+  margin-bottom: 24px;
+}
+
+.rec-radio-group {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 6px 20px;
+}
+
+.rec-item {
+  padding: 12px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.rec-item:hover {
+  border-color: rgba(102, 126, 234, 0.35);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.12);
+}
+
+.rec-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.rec-rank {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  background: rgba(102, 126, 234, 0.12);
+  color: #4c5bd4;
+}
+
+.rec-item-meta {
+  margin-left: 30px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #606266;
+  font-size: 12px;
+}
+
+.meta-text {
+  opacity: 0.9;
 }
 
 .section-header {

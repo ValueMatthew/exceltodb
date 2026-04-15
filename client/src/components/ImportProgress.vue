@@ -6,7 +6,7 @@
       </div>
       <div>
         <h2>数据导入</h2>
-        <p class="subtitle" v-if="status === 'importing'">正在导入数据，请稍候...</p>
+        <p class="subtitle" v-if="status === 'importing'">服务端正在写入数据库，请勿关闭页面...</p>
         <p class="subtitle" v-else-if="status === 'success'">导入完成</p>
         <p class="subtitle" v-else-if="status === 'error'">导入失败</p>
         <p class="subtitle" v-else>准备开始导入...</p>
@@ -24,8 +24,9 @@
         >
           <template #default="{ percentage }">
             <div class="progress-inner">
-              <span class="progress-value">{{ percentage }}%</span>
-              <span class="progress-label">已完成</span>
+              <span class="progress-value" v-if="status === 'importing'">写入中</span>
+              <span class="progress-value" v-else>{{ percentage }}%</span>
+              <span class="progress-label">{{ progressLabel }}</span>
             </div>
           </template>
         </el-progress>
@@ -123,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -134,18 +135,26 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['reset', 'back'])
+const emit = defineEmits(['reset', 'back', 'done'])
 
 const status = ref('idle')
 const progress = ref(0)
 const detailText = ref('')
 const errorMessage = ref('')
 const resultData = ref(null)
+const pulseTimer = ref(null)
 
 const progressStatus = computed(() => {
   if (status.value === 'error') return 'exception'
   if (status.value === 'success') return 'success'
   return ''
+})
+
+const progressLabel = computed(() => {
+  if (status.value === 'importing') return '写入数据库中'
+  if (status.value === 'success') return '已完成'
+  if (status.value === 'error') return '已失败'
+  return '准备中'
 })
 
 const statusIcon = computed(() => {
@@ -169,27 +178,40 @@ const conflictStrategyText = computed(() => {
   return map[props.params.conflictStrategy] || props.params.conflictStrategy
 })
 
+const startPulse = () => {
+  stopPulse()
+  // 仅用于“有在工作”的视觉提示，避免误导为真实进度
+  progress.value = 10
+  pulseTimer.value = window.setInterval(() => {
+    if (status.value !== 'importing') return
+    const next = progress.value + 3
+    progress.value = next >= 90 ? 10 : next
+  }, 300)
+}
+
+const stopPulse = () => {
+  if (pulseTimer.value) {
+    window.clearInterval(pulseTimer.value)
+    pulseTimer.value = null
+  }
+}
+
 const startImport = async () => {
   status.value = 'importing'
-  progress.value = 0
-  detailText.value = '正在连接数据库...'
+  detailText.value = '已提交导入请求，正在等待服务器写入完成...'
+  startPulse()
 
   try {
-    const res = await axios.post('/api/import', props.params, {
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          progress.value = Math.min(percent, 100)
-          detailText.value = `处理中... ${percent}%`
-        }
-      }
-    })
+    const res = await axios.post('/api/import', props.params)
 
     resultData.value = res.data
+    stopPulse()
     progress.value = 100
     status.value = 'success'
     detailText.value = ''
+    emit('done')
   } catch (err) {
+    stopPulse()
     status.value = 'error'
     errorMessage.value = err.response?.data?.message || err.message || '未知错误'
     ElMessage.error('导入失败: ' + errorMessage.value)
@@ -206,6 +228,10 @@ const handleBack = () => {
 
 onMounted(() => {
   startImport()
+})
+
+onBeforeUnmount(() => {
+  stopPulse()
 })
 </script>
 

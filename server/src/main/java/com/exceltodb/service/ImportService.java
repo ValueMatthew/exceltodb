@@ -6,12 +6,15 @@ import com.exceltodb.model.CreateTableRequest;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
 import com.exceltodb.model.TableInfo;
+import com.opencsv.CSVReader;
+import com.opencsv.exceptions.CsvException;
 import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -50,14 +53,30 @@ public class ImportService {
                     }
                 }
 
-                // Read all data from file
-                List<String[]> allData = excelParserService.readAllData(request.getFilename());
-                if (allData.isEmpty()) {
-                    throw new RuntimeException("文件没有数据");
+                String filename = request.getFilename();
+                if (filename == null || filename.isBlank()) {
+                    throw new RuntimeException("文件名为空");
                 }
 
-                String[] headers = allData.get(0);
-                List<String[]> dataRows = allData.subList(1, allData.size());
+                String[] headers;
+                Iterable<String[]> rowsIterable;
+                boolean isCsv = filename.toLowerCase().endsWith(".csv");
+
+                CsvStream csvStream = null;
+                if (isCsv) {
+                    // Stream CSV to avoid reading all rows into memory
+                    csvStream = openCsvStream(filename);
+                    headers = csvStream.header;
+                    rowsIterable = csvStream;
+                } else {
+                    // Excel path: keep existing reader for now (POI streaming refactor can be done later)
+                    List<String[]> allData = excelParserService.readAllData(filename);
+                    if (allData.isEmpty()) {
+                        throw new RuntimeException("文件没有数据");
+                    }
+                    headers = allData.get(0);
+                    rowsIterable = allData.subList(1, allData.size());
+                }
 
                 // Determine conflict strategy
                 String conflictAction = getConflictAction(request, headers);
@@ -84,11 +103,13 @@ public class ImportService {
                 String sql = sqlBuilder.toString();
 
                 try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                    int totalRows = dataRows.size();
                     int importedRows = 0;
+                    int batchSize = Math.max(1, appConfig.getBatchSize());
+                    int batchCount = 0;
+                    int rowIndex = 0;
 
-                    for (int i = 0; i < totalRows; i++) {
-                        String[] row = dataRows.get(i);
+                    for (String[] row : rowsIterable) {
+                        rowIndex++;
 
                         // Skip if row has fewer columns than headers
                         if (row.length < headers.length) {
@@ -100,25 +121,33 @@ public class ImportService {
                         }
 
                         try {
-                            int affected = pstmt.executeUpdate();
-                            // Count rows that were actually inserted or updated (affected >= 1)
-                            // UPSERT: 1=inserted, 2=updated; IGNORE: 0=ignored, 1=inserted
-                            if (affected >= 1) {
-                                importedRows++;
+                            pstmt.addBatch();
+                            batchCount++;
+                            if (batchCount >= batchSize) {
+                                importedRows += executeAndCountBatch(pstmt);
+                                batchCount = 0;
                             }
                         } catch (SQLException e) {
                             // Primary key conflict or other SQL error
                             // Rollback entire transaction on first error for ERROR strategy
                             if ("ERROR".equals(request.getConflictStrategy())) {
-                                throw new RuntimeException("第 " + (i + 1) + " 行导入失败: " + e.getMessage(), e);
+                                throw new RuntimeException("第 " + rowIndex + " 行导入失败: " + e.getMessage(), e);
                             }
                             // For UPSERT/IGNORE, errors are already handled by the SQL clause
                         }
                     }
 
+                    if (batchCount > 0) {
+                        importedRows += executeAndCountBatch(pstmt);
+                    }
+
                     result.setImportedRows(importedRows);
                     result.setSuccess(true);
                     result.setMessage("导入成功");
+                } finally {
+                    if (csvStream != null) {
+                        try { csvStream.close(); } catch (Exception ignored) {}
+                    }
                 }
 
                 conn.commit();
@@ -134,6 +163,93 @@ public class ImportService {
         }
 
         return result;
+    }
+
+    private int executeAndCountBatch(PreparedStatement pstmt) throws SQLException {
+        int[] counts = pstmt.executeBatch();
+        int imported = 0;
+        for (int c : counts) {
+            if (c == Statement.SUCCESS_NO_INFO) {
+                imported += 1;
+            } else if (c >= 1) {
+                imported += 1;
+            }
+        }
+        return imported;
+    }
+
+    private CsvStream openCsvStream(String filename) throws IOException {
+        Path path = excelParserService.getFilePath(filename);
+        if (path == null) {
+            throw new RuntimeException("文件不存在: " + filename);
+        }
+        try {
+            CSVReader reader = excelParserService.createCsvReader(path);
+            String[] header = reader.readNext();
+            if (header == null) {
+                try { reader.close(); } catch (Exception ignored) {}
+                throw new RuntimeException("文件没有数据");
+            }
+            // Reuse BOM stripping logic from parser by calling readAllData would defeat streaming;
+            // simplest: strip UTF-8 BOM if present.
+            if (header.length > 0 && header[0] != null && !header[0].isEmpty() && header[0].charAt(0) == '\uFEFF') {
+                header[0] = header[0].substring(1);
+            }
+            return new CsvStream(reader, header);
+        } catch (CsvException e) {
+            throw new RuntimeException("CSV解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static class CsvStream implements Iterable<String[]>, AutoCloseable {
+        private final CSVReader reader;
+        private final String[] header;
+        private boolean closed = false;
+
+        private CsvStream(CSVReader reader, String[] header) {
+            this.reader = reader;
+            this.header = header;
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (closed) return;
+            closed = true;
+            reader.close();
+        }
+
+        @Override
+        public Iterator<String[]> iterator() {
+            return new Iterator<>() {
+                String[] next = readNext();
+
+                private String[] readNext() {
+                    try {
+                        return reader.readNext();
+                    } catch (Exception e) {
+                        try { close(); } catch (Exception ignored) {}
+                        throw new RuntimeException("CSV读取失败: " + e.getMessage(), e);
+                    }
+                }
+
+                @Override
+                public boolean hasNext() {
+                    if (next == null) {
+                        try { close(); } catch (Exception ignored) {}
+                        return false;
+                    }
+                    return true;
+                }
+
+                @Override
+                public String[] next() {
+                    if (next == null) throw new NoSuchElementException();
+                    String[] cur = next;
+                    next = readNext();
+                    return cur;
+                }
+            };
+        }
     }
 
     private String getConflictAction(ImportRequest request, String[] headers) {

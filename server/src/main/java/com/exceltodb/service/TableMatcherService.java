@@ -4,12 +4,15 @@ import com.exceltodb.model.TableInfo;
 import com.exceltodb.model.TableRecommendation;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
 public class TableMatcherService {
 
     private static final double MATCH_THRESHOLD = 0.9;
+    private static final List<String> BACKUP_LIKE_KEYWORDS = List.of("test", "bak", "back", "full");
 
     public TableRecommendation findBestMatch(List<TableInfo> tables, List<String> excelColumns, String filename) {
         if (tables == null || tables.isEmpty() || excelColumns == null || excelColumns.isEmpty()) {
@@ -30,6 +33,31 @@ public class TableMatcherService {
 
         // Always return the best match, frontend decides whether to show it based on score
         return bestMatch;
+    }
+
+    public List<TableRecommendation> findMatchesAboveThreshold(List<TableInfo> tables,
+                                                               List<String> excelColumns,
+                                                               int thresholdPercent) {
+        if (tables == null || tables.isEmpty() || excelColumns == null || excelColumns.isEmpty()) {
+            return List.of();
+        }
+
+        List<TableRecommendation> matches = new ArrayList<>();
+        for (TableInfo table : tables) {
+            double score = calculateMatchScore(table, excelColumns);
+            int rounded = (int) Math.round(score);
+            if (rounded >= thresholdPercent) {
+                matches.add(createRecommendation(table, excelColumns, score));
+            }
+        }
+
+        matches.sort(
+                Comparator.comparingInt(TableRecommendation::getScore).reversed()
+                        .thenComparing(rec -> isBackupLike(rec.getTableName()))
+                        .thenComparing(TableRecommendation::getTableName, String.CASE_INSENSITIVE_ORDER)
+        );
+
+        return matches;
     }
 
     private double calculateMatchScore(TableInfo table, List<String> excelColumns) {
@@ -66,6 +94,15 @@ public class TableMatcherService {
         }
 
         return (double) matchCount / excelColumns.size();
+    }
+
+    private boolean isBackupLike(String tableName) {
+        if (tableName == null || tableName.isBlank()) return false;
+        String lower = tableName.toLowerCase();
+        for (String k : BACKUP_LIKE_KEYWORDS) {
+            if (lower.contains(k)) return true;
+        }
+        return false;
     }
 
     private TableRecommendation createRecommendation(TableInfo table, List<String> excelColumns, double score) {

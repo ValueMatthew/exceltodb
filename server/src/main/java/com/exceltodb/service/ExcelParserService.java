@@ -21,13 +21,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.*;
 
 @Service
 public class ExcelParserService {
 
     private final AppConfig appConfig;
-    private final Map<String, Path> uploadedFiles = new HashMap<>();
+    private final Map<String, Path> uploadedFiles = new ConcurrentHashMap<>();
+    private final Map<String, ParseResult> parseCache = new ConcurrentHashMap<>();
+    private final Map<String, PreviewResult> previewCache = new ConcurrentHashMap<>();
+    private static final int DEFAULT_PREVIEW_ROWS = 100;
 
     public ExcelParserService(AppConfig appConfig) {
         this.appConfig = appConfig;
@@ -51,13 +55,20 @@ public class ExcelParserService {
             Files.createDirectories(filePath.getParent());
             file.transferTo(filePath);
             uploadedFiles.put(uniqueFilename, filePath);
+            // Drop any stale cache for the same generated name (defensive)
+            parseCache.remove(uniqueFilename);
+            previewCache.remove(uniqueFilename);
 
             // Parse based on extension
             String lowerName = originalFilename.toLowerCase();
             if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-                return parseExcel(filePath, uniqueFilename);
+                ParseResult result = parseExcel(filePath, uniqueFilename);
+                parseCache.put(uniqueFilename, result);
+                return result;
             } else if (lowerName.endsWith(".csv")) {
-                return parseCsv(filePath, uniqueFilename);
+                ParseResult result = parseCsv(filePath, uniqueFilename);
+                parseCache.put(uniqueFilename, result);
+                return result;
             } else {
                 throw new RuntimeException("不支持的文件格式: " + originalFilename);
             }
@@ -98,17 +109,20 @@ public class ExcelParserService {
 
     private ParseResult parseCsv(Path filePath, String filename) throws IOException {
         try (CSVReader reader = createCsvReader(filePath)) {
-            List<String[]> allLines = reader.readAll();
-
-            if (allLines.isEmpty()) {
+            String[] header = reader.readNext();
+            if (header == null) {
                 throw new RuntimeException("CSV文件为空");
+            }
+            stripBomInPlace(header);
+
+            int rowCount = 0;
+            while (reader.readNext() != null) {
+                rowCount++;
             }
 
             ParseResult result = new ParseResult();
             result.setFilename(filename);
-            result.setRowCount(allLines.size() - 1); // exclude header
-            String[] header = allLines.get(0);
-            stripBomInPlace(header);
+            result.setRowCount(rowCount); // exclude header
             result.setColumns(Arrays.asList(header));
             result.setSheetName("Sheet1");
 
@@ -119,19 +133,31 @@ public class ExcelParserService {
     }
 
     public PreviewResult getPreview(String filename, int maxRows) throws IOException, InvalidFormatException {
+        // Cache only for the standard preview size to maximize hit rate
+        if (maxRows == DEFAULT_PREVIEW_ROWS) {
+            PreviewResult cached = previewCache.get(filename);
+            if (cached != null) return cached;
+        }
+
         Path filePath = uploadedFiles.get(filename);
         if (filePath == null) {
             throw new RuntimeException("文件不存在或已过期: " + filename);
         }
 
         String lowerName = filename.toLowerCase();
+        PreviewResult result;
         if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-            return getExcelPreview(filePath, filename, maxRows);
+            result = getExcelPreview(filePath, filename, maxRows);
         } else if (lowerName.endsWith(".csv")) {
-            return getCsvPreview(filePath, filename, maxRows);
+            result = getCsvPreview(filePath, filename, maxRows);
         } else {
             throw new RuntimeException("不支持的文件格式");
         }
+
+        if (maxRows == DEFAULT_PREVIEW_ROWS) {
+            previewCache.put(filename, result);
+        }
+        return result;
     }
 
     private PreviewResult getExcelPreview(Path filePath, String filename, int maxRows) throws IOException, InvalidFormatException {
@@ -176,26 +202,26 @@ public class ExcelParserService {
 
     private PreviewResult getCsvPreview(Path filePath, String filename, int maxRows) throws IOException {
         try (CSVReader reader = createCsvReader(filePath)) {
-            List<String[]> allLines = reader.readAll();
-
             PreviewResult result = new PreviewResult();
             result.setFilename(filename);
-            result.setTotalRows(allLines.size() - 1);
             result.setSheetName("Sheet1");
 
-            if (allLines.isEmpty()) {
+            String[] header = reader.readNext();
+            if (header == null) {
+                result.setTotalRows(0);
                 return result;
             }
-
-            String[] header = allLines.get(0);
             stripBomInPlace(header);
             result.setColumns(Arrays.asList(header));
 
             List<Map<String, Object>> previewRows = new ArrayList<>();
-            int rowCount = Math.min(maxRows, allLines.size() - 1);
-
-            for (int i = 1; i <= rowCount; i++) {
-                String[] line = allLines.get(i);
+            int totalRows = 0;
+            String[] line;
+            while ((line = reader.readNext()) != null) {
+                totalRows++;
+                if (previewRows.size() >= maxRows) {
+                    continue;
+                }
                 Map<String, Object> rowData = new LinkedHashMap<>();
                 for (int j = 0; j < result.getColumns().size(); j++) {
                     rowData.put(result.getColumns().get(j), j < line.length ? line[j] : "");
@@ -203,6 +229,7 @@ public class ExcelParserService {
                 previewRows.add(rowData);
             }
             result.setPreviewRows(previewRows);
+            result.setTotalRows(totalRows);
 
             return result;
         } catch (CsvException e) {
@@ -240,6 +267,8 @@ public class ExcelParserService {
     }
 
     public List<String[]> readAllData(String filename) throws IOException, InvalidFormatException {
+        // If we've already previewed, we can reuse the parsed columns for header length, but
+        // readAllData is still a full read; caller (ImportService) should prefer streaming where possible.
         Path filePath = uploadedFiles.get(filename);
         if (filePath == null) {
             throw new RuntimeException("文件不存在: " + filename);
@@ -293,7 +322,7 @@ public class ExcelParserService {
         }
     }
 
-    private CSVReader createCsvReader(Path filePath) throws IOException {
+    public CSVReader createCsvReader(Path filePath) throws IOException {
         Charset charset = detectTextCharset(filePath);
         return new CSVReader(new BufferedReader(new InputStreamReader(Files.newInputStream(filePath), charset)));
     }
@@ -362,5 +391,9 @@ public class ExcelParserService {
 
     public Path getFilePath(String filename) {
         return uploadedFiles.get(filename);
+    }
+
+    public ParseResult getParseResult(String filename) {
+        return parseCache.get(filename);
     }
 }

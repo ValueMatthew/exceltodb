@@ -14,7 +14,7 @@
 
     <div class="app-container">
       <div class="steps-card">
-        <el-steps :active="currentStep" finish-status="success" align-center class="steps">
+        <el-steps :active="stepsActive" finish-status="success" align-center class="steps">
           <el-step title="选择数据库" description="选择目标数据库" />
           <el-step title="上传文件" description="上传Excel/CSV" />
           <el-step title="数据预览" description="确认数据内容" />
@@ -29,7 +29,13 @@
           <FileUpload v-else-if="currentStep === 1" @next="handleUploadNext" @back="currentStep--" />
           <DataPreview v-else-if="currentStep === 2" @next="handlePreviewNext" @back="currentStep--" />
           <TableRecommend v-else-if="currentStep === 3" @next="handleTableNext" @back="currentStep--" />
-          <ImportProgress v-else-if="currentStep === 4" :params="importParams" @reset="handleReset" @back="currentStep = 3" />
+          <ImportProgress
+            v-else-if="currentStep === 4"
+            :params="importParams"
+            @done="handleImportDone"
+            @reset="handleReset"
+            @back="currentStep = 3"
+          />
         </transition>
       </div>
     </div>
@@ -41,7 +47,7 @@
 </template>
 
 <script setup>
-import { ref, provide } from 'vue'
+import { ref, provide, computed } from 'vue'
 import DbSelector from './components/DbSelector.vue'
 import FileUpload from './components/FileUpload.vue'
 import DataPreview from './components/DataPreview.vue'
@@ -49,6 +55,7 @@ import TableRecommend from './components/TableRecommend.vue'
 import ImportProgress from './components/ImportProgress.vue'
 
 const currentStep = ref(0)
+const importDone = ref(false)
 const selectedDb = ref(null)
 const uploadedFile = ref(null)
 const previewData = ref(null)
@@ -59,6 +66,11 @@ provide('selectedDb', selectedDb)
 provide('uploadedFile', uploadedFile)
 provide('previewData', previewData)
 provide('selectedTable', selectedTable)
+
+const stepsActive = computed(() => {
+  // el-steps: active 大于最后一个索引时会显示“全部完成”态
+  return importDone.value ? 5 : currentStep.value
+})
 
 const handleDbNext = (db) => {
   selectedDb.value = db
@@ -83,11 +95,17 @@ const handleTableNext = (table) => {
     importMode: table.importMode || 'INCREMENTAL',
     conflictStrategy: table.conflictStrategy || 'ERROR'
   }
+  importDone.value = false
   currentStep.value = 4
+}
+
+const handleImportDone = () => {
+  importDone.value = true
 }
 
 const handleReset = () => {
   currentStep.value = 0
+  importDone.value = false
   selectedDb.value = null
   uploadedFile.value = null
   previewData.value = null

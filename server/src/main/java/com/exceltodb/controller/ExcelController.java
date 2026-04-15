@@ -77,21 +77,34 @@ public class ExcelController {
     }
 
     @PostMapping("/recommend")
-    public ResponseEntity<TableRecommendation> getRecommendation(@RequestBody RecommendRequest request) {
+    public ResponseEntity<TableRecommendationResponse> getRecommendation(@RequestBody RecommendRequest request) {
         try {
             List<TableInfo> tables = dbService.getAllTables(request.getDatabaseId());
-            PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100);
-
-            TableRecommendation recommendation = tableMatcherService.findBestMatch(
-                    tables, preview.getColumns(), request.getFilename());
-
-            // Always return recommendation with score (may be 0)
-            if (recommendation == null) {
-                recommendation = new TableRecommendation();
-                recommendation.setScore(0);
+            // Prefer client-provided columns to avoid re-reading the file (preview step already parsed them)
+            List<String> excelColumns = request.getColumns();
+            if (excelColumns == null || excelColumns.isEmpty()) {
+                PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100);
+                excelColumns = preview.getColumns();
             }
 
-            return ResponseEntity.ok(recommendation);
+            final int threshold = 90;
+            List<TableRecommendation> recommendations = tableMatcherService.findMatchesAboveThreshold(
+                    tables, excelColumns, threshold);
+
+            int topScore = 0;
+            if (!recommendations.isEmpty()) {
+                topScore = recommendations.get(0).getScore();
+            } else {
+                TableRecommendation best = tableMatcherService.findBestMatch(
+                        tables, excelColumns, request.getFilename());
+                topScore = best == null ? 0 : best.getScore();
+            }
+
+            TableRecommendationResponse resp = new TableRecommendationResponse();
+            resp.setThreshold(threshold);
+            resp.setTopScore(topScore);
+            resp.setRecommendations(recommendations);
+            return ResponseEntity.ok(resp);
         } catch (Exception e) {
             return ResponseEntity.status(500).build();
         }
