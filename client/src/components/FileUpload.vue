@@ -85,13 +85,21 @@
       </div>
     </transition>
 
+    <transition name="el-fade-in">
+      <div v-if="uploading" class="parse-result">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>正在上传并解析，请稍候…</template>
+        </el-alert>
+      </div>
+    </transition>
+
     <div class="actions">
       <el-button @click="$emit('back')" size="large">上一步</el-button>
       <el-button
         type="primary"
         size="large"
         @click="handleNext"
-        :disabled="!canProceed"
+        :disabled="!canProceed || uploading"
         class="next-btn"
       >
         下一步 →
@@ -115,39 +123,71 @@ const fileInfo = ref(null)
 const parseResult = ref(null)
 const parseError = ref(null)
 const canProceed = ref(false)
+const uploading = ref(false)
+let uploadSeq = 0
+let abortController = null
+
+const resetUploadState = () => {
+  parseError.value = null
+  parseResult.value = null
+  canProceed.value = false
+  uploadedFile.value = null
+}
 
 const handleFileChange = async (file) => {
+  // 新选择文件时，清理旧结果 & 中断上一次上传
+  resetUploadState()
+  uploading.value = true
+  const seq = ++uploadSeq
+
+  if (abortController) abortController.abort()
+  abortController = new AbortController()
+
   currentFile.value = file.raw
   fileInfo.value = {
     name: file.name,
     size: file.size,
     type: file.raw.type
   }
-  parseError.value = null
-  parseResult.value = null
-  canProceed.value = false
 
   const formData = new FormData()
   formData.append('file', file.raw)
 
   try {
     const res = await axios.post(uploadUrl, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      signal: abortController.signal
     })
+    if (seq !== uploadSeq) return
     parseResult.value = res.data
     canProceed.value = true
+    uploadedFile.value = {
+      filename: res.data?.filename,
+      ...res.data
+    }
+    ElMessage.success(`上传成功：${fileInfo.value?.name || ''}`.trim())
   } catch (err) {
+    // 主动中断不提示错误
+    if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
+    if (seq !== uploadSeq) return
     parseError.value = err.response?.data?.message || '文件解析失败，请检查文件格式'
     ElMessage.error(parseError.value)
+  } finally {
+    if (seq === uploadSeq) uploading.value = false
   }
 }
 
 const handleFileRemove = () => {
+  uploadSeq++
+  if (abortController) abortController.abort()
+  abortController = null
   currentFile.value = null
   fileInfo.value = null
   parseResult.value = null
   parseError.value = null
   canProceed.value = false
+  uploading.value = false
+  uploadedFile.value = null
 }
 
 const formatSize = (bytes) => {
@@ -168,9 +208,12 @@ const getFileType = (filename) => {
 
 const handleNext = () => {
   if (parseResult.value) {
-    uploadedFile.value = {
-      filename: parseResult.value.filename,
-      ...parseResult.value
+    // uploadedFile 已在上传成功时写入；这里保持兼容
+    if (!uploadedFile.value) {
+      uploadedFile.value = {
+        filename: parseResult.value.filename,
+        ...parseResult.value
+      }
     }
     emit('next', uploadedFile.value)
   }

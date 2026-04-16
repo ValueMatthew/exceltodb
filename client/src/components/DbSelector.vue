@@ -59,16 +59,23 @@
       </el-card>
 
       <div class="test-section">
-        <template v-if="connectionStatus === 'success'">
+        <template v-if="testing">
+          <el-button type="primary" size="large" :loading="true" class="test-btn" disabled>
+            正在测试连接…
+          </el-button>
+        </template>
+        <template v-else-if="connectionStatus === 'success'">
           <el-result icon="success" title="连接成功" class="connection-result" />
+          <el-button size="small" @click="testConnection" class="retest-btn">重新测试</el-button>
         </template>
         <template v-else-if="connectionStatus === 'failed'">
           <el-result icon="error" title="连接失败" :sub-title="connectionError" class="connection-result" />
+          <el-button type="primary" size="large" @click="testConnection" class="test-btn">
+            重试连接
+          </el-button>
         </template>
         <template v-else>
-          <el-button type="primary" size="large" @click="testConnection" :loading="testing" class="test-btn">
-            测试连接
-          </el-button>
+          <el-result icon="info" title="正在准备测试连接" sub-title="选择数据库后将自动测试连接" class="connection-result" />
         </template>
       </div>
     </div>
@@ -88,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -100,6 +107,8 @@ const selectedDbId = ref('')
 const connectionStatus = ref(null)
 const connectionError = ref('')
 const testing = ref(false)
+let testDebounceTimer = null
+let testSeq = 0
 
 const selectedDbInfo = computed(() => {
   return databases.value.find(db => db.id === selectedDbId.value)
@@ -118,17 +127,22 @@ const loadDatabases = async () => {
   }
 }
 
-const testConnection = async () => {
+const testConnection = async (dbId = selectedDbId.value) => {
+  if (!dbId) return
+  const seq = ++testSeq
   testing.value = true
   connectionStatus.value = null
+  connectionError.value = ''
   try {
-    await axios.get(`/api/databases/${selectedDbId.value}/test`)
+    await axios.get(`/api/databases/${dbId}/test`)
+    if (seq !== testSeq) return
     connectionStatus.value = 'success'
   } catch (err) {
+    if (seq !== testSeq) return
     connectionStatus.value = 'failed'
     connectionError.value = err.response?.data?.message || '无法连接到数据库'
   } finally {
-    testing.value = false
+    if (seq === testSeq) testing.value = false
   }
 }
 
@@ -141,6 +155,28 @@ const handleNext = () => {
 
 onMounted(() => {
   loadDatabases()
+})
+
+watch(
+  selectedDbId,
+  (dbId) => {
+    testSeq++
+    testing.value = false
+    connectionStatus.value = null
+    connectionError.value = ''
+
+    if (testDebounceTimer) clearTimeout(testDebounceTimer)
+    if (!dbId) return
+
+    testDebounceTimer = setTimeout(() => {
+      testConnection(dbId)
+    }, 300)
+  },
+  { flush: 'post' }
+)
+
+onBeforeUnmount(() => {
+  if (testDebounceTimer) clearTimeout(testDebounceTimer)
 })
 </script>
 
@@ -270,6 +306,10 @@ onMounted(() => {
   font-size: 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
+}
+
+.retest-btn {
+  margin-top: 10px;
 }
 
 .actions {
