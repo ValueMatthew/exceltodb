@@ -6,7 +6,7 @@
       </div>
       <div>
         <h2>选择目标表</h2>
-        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度 ≥ 90% 的数据表，也可从表列表手动选择</p>
+        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度 ≥ 90% 的数据表</p>
       </div>
     </div>
 
@@ -76,55 +76,6 @@
       </transition>
 
       <transition name="el-fade-in">
-        <div v-if="!loading" class="table-list">
-          <el-divider content-position="left">
-            <span class="import-divider-text">可导入表列表</span>
-          </el-divider>
-
-          <el-card shadow="never" class="list-card">
-            <div class="list-toolbar">
-              <el-input
-                v-model="tableFilter"
-                clearable
-                placeholder="搜索表名（支持模糊匹配）"
-                class="filter-input"
-              />
-              <el-button :loading="tablesLoading" @click="loadTables">刷新</el-button>
-            </div>
-
-            <div v-if="tablesLoading" class="tables-loading">
-              <el-icon class="is-loading"><loading /></el-icon>
-              <span>正在加载表列表...</span>
-            </div>
-
-            <el-table
-              v-else
-              :data="filteredTables"
-              size="default"
-              stripe
-              class="tables"
-              max-height="320"
-              empty-text="未加载到表信息"
-            >
-              <el-table-column prop="name" label="表名" min-width="240" show-overflow-tooltip />
-              <el-table-column prop="columnCount" label="列数" width="90" align="center" />
-              <el-table-column prop="primaryKey" label="主键" width="140" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <el-tag v-if="row.primaryKey" type="warning" size="small"> {{ row.primaryKey }} </el-tag>
-                  <el-tag v-else type="info" size="small">无</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="120" align="center">
-                <template #default="{ row }">
-                  <el-button type="primary" link @click="selectTable(row)">选择</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </div>
-      </transition>
-
-      <transition name="el-fade-in">
         <div v-if="selectedTableInfo" class="import-options">
           <el-divider content-position="left">
             <span class="import-divider-text">导入设置</span>
@@ -183,7 +134,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -207,15 +158,6 @@ const isBackupLike = (tableName) => {
   const lower = String(tableName).toLowerCase()
   return backupKeywords.some(k => lower.includes(k))
 }
-const tablesLoading = ref(false)
-const tables = ref([])
-const tableFilter = ref('')
-
-const filteredTables = computed(() => {
-  const q = (tableFilter.value || '').trim().toLowerCase()
-  if (!q) return tables.value
-  return (tables.value || []).filter(t => (t?.name || '').toLowerCase().includes(q))
-})
 
 const loadRecommendation = async () => {
   if (!selectedDb.value?.id) return
@@ -241,20 +183,6 @@ const loadRecommendation = async () => {
     ElMessage.error('加载表信息失败')
   } finally {
     loading.value = false
-  }
-}
-
-const loadTables = async () => {
-  if (!selectedDb.value?.id) return
-  tablesLoading.value = true
-  try {
-    const res = await axios.get(`/api/tables/${selectedDb.value.id}`)
-    tables.value = Array.isArray(res.data) ? res.data : []
-  } catch (err) {
-    tables.value = []
-    ElMessage.error('加载表列表失败')
-  } finally {
-    tablesLoading.value = false
   }
 }
 
@@ -287,7 +215,6 @@ const confirmImport = () => {
 
 onMounted(() => {
   loadRecommendation()
-  loadTables()
 })
 </script>
 
@@ -505,41 +432,6 @@ onMounted(() => {
 
 .no-match-alert {
   border-radius: 12px;
-}
-
-.table-list {
-  margin-top: 16px;
-}
-
-.list-card {
-  background: #fafafa;
-  border: none;
-}
-
-.list-toolbar {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.filter-input {
-  flex: 1;
-}
-
-.tables-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #667eea;
-  padding: 20px 12px;
-  font-size: 14px;
-}
-
-.tables {
-  border-radius: 12px;
-  overflow: hidden;
 }
 
 .import-options {

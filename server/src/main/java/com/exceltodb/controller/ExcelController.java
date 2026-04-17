@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
@@ -45,29 +44,25 @@ public class ExcelController {
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<?> uploadFile(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<ParseResult> uploadFile(@RequestParam("file") MultipartFile file) {
         try {
             ParseResult result = excelParserService.parseAndSave(file);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             System.err.println("Upload error: " + e.getClass().getName() + ": " + e.getMessage());
             e.printStackTrace();
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() == null ? "上传失败" : e.getMessage()));
+            return ResponseEntity.badRequest().build();
         }
     }
 
     @GetMapping("/preview/{filename}")
-    public ResponseEntity<?> getPreview(@PathVariable String filename,
-                                        @RequestParam(defaultValue = "100") int maxRows) {
+    public ResponseEntity<PreviewResult> getPreview(@PathVariable String filename,
+                                                     @RequestParam(defaultValue = "100") int maxRows) {
         try {
             PreviewResult result = excelParserService.getPreview(filename, maxRows);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            String msg = e.getMessage() == null ? "加载预览失败" : e.getMessage();
-            if (msg.contains("文件不存在") || msg.contains("已过期")) {
-                return ResponseEntity.status(404).body(Map.of("message", msg));
-            }
-            return ResponseEntity.badRequest().body(Map.of("message", msg));
+            return ResponseEntity.notFound().build();
         }
     }
 

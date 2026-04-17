@@ -108,7 +108,7 @@ const loadPreview = async () => {
     const res = await axios.get(`/api/preview/${uploadedFile.value.filename}`)
     previewData.value = res.data
   } catch (err) {
-    ElMessage.error(err.response?.data?.message || '加载预览数据失败')
+    ElMessage.error('加载预览数据失败')
   } finally {
     loading.value = false
   }

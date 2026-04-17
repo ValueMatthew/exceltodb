@@ -114,13 +114,10 @@ public class ExcelParserService {
                 throw new RuntimeException("CSV文件为空");
             }
             stripBomInPlace(header);
-            validateCsvHeader(header, "CSV解析失败");
 
             int rowCount = 0;
-            String[] row;
-            while ((row = reader.readNext()) != null) {
+            while (reader.readNext() != null) {
                 rowCount++;
-                validateCsvRowShape(filePath, header.length, row, rowCount + 1, "CSV解析失败");
             }
 
             ParseResult result = new ParseResult();
@@ -215,7 +212,6 @@ public class ExcelParserService {
                 return result;
             }
             stripBomInPlace(header);
-            validateCsvHeader(header, "CSV预览失败");
             result.setColumns(Arrays.asList(header));
 
             List<Map<String, Object>> previewRows = new ArrayList<>();
@@ -223,7 +219,6 @@ public class ExcelParserService {
             String[] line;
             while ((line = reader.readNext()) != null) {
                 totalRows++;
-                validateCsvRowShape(filePath, result.getColumns().size(), line, totalRows + 1, "CSV预览失败");
                 if (previewRows.size() >= maxRows) {
                     continue;
                 }
@@ -320,11 +315,6 @@ public class ExcelParserService {
             List<String[]> all = reader.readAll();
             if (!all.isEmpty()) {
                 stripBomInPlace(all.get(0));
-                validateCsvHeader(all.get(0), "CSV读取失败");
-                int expected = all.get(0).length;
-                for (int i = 1; i < all.size(); i++) {
-                    validateCsvRowShape(filePath, expected, all.get(i), i + 1, "CSV读取失败");
-                }
             }
             return all;
         } catch (CsvException e) {
@@ -397,138 +387,6 @@ public class ExcelParserService {
             return s.substring(1);
         }
         return s;
-    }
-
-    private void validateCsvHeader(String[] header, String action) {
-        if (header == null || header.length == 0) return;
-        for (int i = 0; i < header.length; i++) {
-            String col = header[i] == null ? "" : header[i].trim();
-            if (col.isEmpty()) {
-                throw new RuntimeException(action + "：CSV 表头第 " + (i + 1) + " 列为空。常见原因：表头行末尾多了一个分隔符（例如以逗号结尾）。");
-            }
-        }
-        Set<String> seen = new HashSet<>();
-        for (String col : header) {
-            String key = (col == null ? "" : col.trim()).toLowerCase(Locale.ROOT);
-            if (!seen.add(key)) {
-                throw new RuntimeException(action + "：CSV 表头存在重复列名：" + col + "。请检查导出配置，确保列名唯一。");
-            }
-        }
-    }
-
-    private void validateCsvRowShape(Path filePath, int expectedCols, String[] row, int lineNo1Based, String action) {
-        int actualCols = row == null ? 0 : row.length;
-        if (actualCols == expectedCols) return;
-
-        String preview = buildCsvRowPreview(row, 6, 180);
-        String rawLinePreview = buildRawLinePreview(filePath, lineNo1Based, 260);
-        CsvLineSignals signals = analyzeRawCsvLine(rawLinePreview);
-        String hint = buildCsvShapeHint(expectedCols, actualCols, signals);
-
-        throw new RuntimeException(
-                action + "：第 " + lineNo1Based + " 行解析异常。\n" +
-                        "- 期望列数（表头）：" + expectedCols + "\n" +
-                        "- 实际列数（该行）：" + actualCols + "\n" +
-                        "- 该行内容预览（解析后前几列）： " + preview + "\n" +
-                        "- 该行原始文本片段： " + rawLinePreview + "\n" +
-                        "- 符号统计：逗号(,)=" + signals.commas + "；分号(;)= " + signals.semicolons + "；TAB= " + signals.tabs +
-                        "；双引号(\")=" + signals.doubleQuotes + "\n" +
-                        hint + "\n" +
-                        "建议：用 Excel 打开另存为标准 CSV（逗号分隔）或直接上传 Excel（.xlsx）。"
-        );
-    }
-
-    private String buildCsvShapeHint(int expectedCols, int actualCols, CsvLineSignals signals) {
-        String likelyDelimiter = detectLikelyDelimiter(signals);
-        StringBuilder sb = new StringBuilder();
-        sb.append("初步判断：");
-        if (likelyDelimiter != null && !",".equals(likelyDelimiter)) {
-            sb.append("你的 CSV 很可能不是逗号分隔，而是使用 ").append(likelyDelimiter).append(" 作为分隔符；但当前系统按英文逗号 , 解析。");
-        } else if (actualCols > expectedCols) {
-            sb.append("该行被拆成更多列，常见原因是某个字段里包含英文逗号 , 但没有用双引号包裹（应写成 \"a,b\"）。");
-        } else if (actualCols < expectedCols) {
-            sb.append("该行列数变少，常见原因是该行缺少分隔符，或存在未闭合的引号导致解析器把后续内容吞进同一列。");
-        } else {
-            sb.append("CSV 格式/引号转义不规范。");
-        }
-        if (signals.doubleQuotes % 2 == 1) {
-            sb.append(" 另外：该行双引号数量为奇数，疑似有引号未闭合。");
-        }
-        sb.append("（CSV 字段内若包含逗号/换行，必须用双引号包裹）");
-        return sb.toString();
-    }
-
-    private String buildCsvRowPreview(String[] row, int maxCells, int maxChars) {
-        if (row == null) return "(空行)";
-        StringBuilder sb = new StringBuilder();
-        int cells = Math.min(maxCells, row.length);
-        for (int i = 0; i < cells; i++) {
-            if (i > 0) sb.append(" | ");
-            String v = row[i] == null ? "" : row[i];
-            v = v.replace("\r", "\\r").replace("\n", "\\n").trim();
-            if (v.length() > 60) v = v.substring(0, 60) + "...";
-            sb.append("[").append(v).append("]");
-        }
-        if (row.length > cells) sb.append(" | ...（共 ").append(row.length).append(" 列）");
-        String out = sb.toString();
-        if (out.length() > maxChars) out = out.substring(0, maxChars) + "...";
-        return out;
-    }
-
-    private String buildRawLinePreview(Path filePath, int lineNo1Based, int maxChars) {
-        if (filePath == null) return "(无法获取原始行)";
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(Files.newInputStream(filePath), detectTextCharset(filePath)))) {
-            String line;
-            int current = 0;
-            while ((line = br.readLine()) != null) {
-                current++;
-                if (current == lineNo1Based) {
-                    String v = line;
-                    if (v.length() > maxChars) v = v.substring(0, maxChars) + "...";
-                    return v;
-                }
-            }
-            return "(未找到原始行：" + lineNo1Based + ")";
-        } catch (Exception e) {
-            return "(读取原始行失败：" + (e.getMessage() == null ? "unknown" : e.getMessage()) + ")";
-        }
-    }
-
-    private static class CsvLineSignals {
-        int commas;
-        int semicolons;
-        int tabs;
-        int doubleQuotes;
-    }
-
-    private CsvLineSignals analyzeRawCsvLine(String rawLinePreview) {
-        CsvLineSignals s = new CsvLineSignals();
-        if (rawLinePreview == null) return s;
-        for (int i = 0; i < rawLinePreview.length(); i++) {
-            char c = rawLinePreview.charAt(i);
-            if (c == ',') s.commas++;
-            else if (c == ';') s.semicolons++;
-            else if (c == '\t') s.tabs++;
-            else if (c == '"') s.doubleQuotes++;
-        }
-        int idx = 0;
-        while ((idx = rawLinePreview.indexOf("\\t", idx)) >= 0) {
-            s.tabs++;
-            idx += 2;
-        }
-        return s;
-    }
-
-    private String detectLikelyDelimiter(CsvLineSignals s) {
-        if (s == null) return null;
-        // Heuristic: if one separator appears much more than the others.
-        int max = Math.max(s.commas, Math.max(s.semicolons, s.tabs));
-        if (max == 0) return null;
-        // Require some dominance to avoid false positives.
-        if (max == s.tabs && s.tabs >= s.commas + 3 && s.tabs >= s.semicolons + 3) return "TAB(\\t)";
-        if (max == s.semicolons && s.semicolons >= s.commas + 3 && s.semicolons >= s.tabs + 3) return "分号(;) ";
-        if (max == s.commas) return ","; // default
-        return null;
     }
 
     public Path getFilePath(String filename) {

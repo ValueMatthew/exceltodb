@@ -53,38 +53,29 @@
           </div>
           <div class="detail-item">
             <span class="detail-icon">👤</span>
-            <span class="user-line">
-              <span>{{ selectedDbInfo?.username }}</span>
-              <el-tag v-if="testing" size="small" type="info" effect="plain" class="status-tag">
-                连接中...
-              </el-tag>
-              <el-tag v-else-if="connectionStatus === 'success'" size="small" type="success" class="status-tag">
-                已连接
-              </el-tag>
-              <el-tag
-                v-else-if="connectionStatus === 'failed'"
-                size="small"
-                type="danger"
-                effect="plain"
-                class="status-tag"
-              >
-                连接失败
-              </el-tag>
-            </span>
+            <span>{{ selectedDbInfo?.username }}</span>
           </div>
         </div>
       </el-card>
 
       <div class="test-section">
-        <template v-if="connectionStatus === 'failed'">
-          <el-alert
-            type="error"
-            show-icon
-            :closable="false"
-            class="conn-alert"
-            title="数据库连接失败"
-            :description="connectionError || '无法连接到数据库'"
-          />
+        <template v-if="testing">
+          <el-button type="primary" size="large" :loading="true" class="test-btn" disabled>
+            正在测试连接…
+          </el-button>
+        </template>
+        <template v-else-if="connectionStatus === 'success'">
+          <el-result icon="success" title="连接成功" class="connection-result" />
+          <el-button size="small" @click="testConnection" class="retest-btn">重新测试</el-button>
+        </template>
+        <template v-else-if="connectionStatus === 'failed'">
+          <el-result icon="error" title="连接失败" :sub-title="connectionError" class="connection-result" />
+          <el-button type="primary" size="large" @click="testConnection" class="test-btn">
+            重试连接
+          </el-button>
+        </template>
+        <template v-else>
+          <el-result icon="info" title="正在准备测试连接" sub-title="选择数据库后将自动测试连接" class="connection-result" />
         </template>
       </div>
     </div>
@@ -117,7 +108,7 @@ const connectionStatus = ref(null)
 const connectionError = ref('')
 const testing = ref(false)
 let testDebounceTimer = null
-const testSeq = ref(0)
+let testSeq = 0
 
 const selectedDbInfo = computed(() => {
   return databases.value.find(db => db.id === selectedDbId.value)
@@ -136,23 +127,22 @@ const loadDatabases = async () => {
   }
 }
 
-const testConnection = async () => {
-  if (!selectedDbId.value) return
-  const seq = ++testSeq.value
+const testConnection = async (dbId = selectedDbId.value) => {
+  if (!dbId) return
+  const seq = ++testSeq
   testing.value = true
   connectionStatus.value = null
   connectionError.value = ''
   try {
-    await axios.get(`/api/databases/${selectedDbId.value}/test`)
-    if (seq !== testSeq.value) return
+    await axios.get(`/api/databases/${dbId}/test`)
+    if (seq !== testSeq) return
     connectionStatus.value = 'success'
   } catch (err) {
-    if (seq !== testSeq.value) return
+    if (seq !== testSeq) return
     connectionStatus.value = 'failed'
     connectionError.value = err.response?.data?.message || '无法连接到数据库'
   } finally {
-    if (seq !== testSeq.value) return
-    testing.value = false
+    if (seq === testSeq) testing.value = false
   }
 }
 
@@ -169,18 +159,18 @@ onMounted(() => {
 
 watch(
   selectedDbId,
-  (id) => {
-    testSeq.value++
+  (dbId) => {
+    testSeq++
     testing.value = false
     connectionStatus.value = null
     connectionError.value = ''
 
     if (testDebounceTimer) clearTimeout(testDebounceTimer)
-    if (!id) return
+    if (!dbId) return
 
     testDebounceTimer = setTimeout(() => {
-      testConnection()
-    }, 250)
+      testConnection(dbId)
+    }, 300)
   },
   { flush: 'post' }
 )
@@ -290,16 +280,6 @@ onBeforeUnmount(() => {
   gap: 24px;
 }
 
-.user-line {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-tag {
-  border-radius: 999px;
-}
-
 .detail-item {
   display: flex;
   align-items: center;
@@ -316,18 +296,16 @@ onBeforeUnmount(() => {
   margin: 24px 0;
 }
 
-.testing-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #667eea;
-  padding: 20px 12px;
-  font-size: 14px;
+.connection-result {
+  padding: 20px 0;
 }
 
-.conn-alert {
-  border-radius: 12px;
+.test-btn {
+  width: 100%;
+  height: 48px;
+  font-size: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
 }
 
 .retest-btn {
