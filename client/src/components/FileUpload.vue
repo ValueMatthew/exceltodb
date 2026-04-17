@@ -17,6 +17,7 @@
       :action="uploadUrl"
       :auto-upload="false"
       :on-change="handleFileChange"
+      :on-exceed="handleExceed"
       :on-remove="handleFileRemove"
       :limit="1"
       accept=".xlsx,.xls,.csv"
@@ -79,8 +80,9 @@
 
     <transition name="el-fade-in">
       <div v-if="parseError" class="parse-error">
-        <el-alert type="error" :closable="false" show-icon>
-          <template #title>{{ parseError }}</template>
+        <el-alert type="error" :closable="false" show-icon class="error-alert">
+          <template #title>文件校验未通过</template>
+          <div class="error-detail">{{ parseError }}</div>
         </el-alert>
       </div>
     </transition>
@@ -156,7 +158,7 @@ const handleFileChange = async (file) => {
   try {
     const res = await axios.post(uploadUrl, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      signal: abortController.signal
+      signal: abortController?.signal
     })
     if (seq !== uploadSeq) return
     parseResult.value = res.data
@@ -175,6 +177,20 @@ const handleFileChange = async (file) => {
   } finally {
     if (seq === uploadSeq) uploading.value = false
   }
+}
+
+const handleExceed = (files) => {
+  // When user selects a new file while limit=1, replace with the latest.
+  const latest = files?.[0]
+  if (!latest) return
+  uploadRef.value?.clearFiles?.()
+  // ensure internal file list is updated, so UI reflects latest selection
+  uploadRef.value?.handleStart?.(latest)
+  handleFileChange({
+    name: latest.name,
+    size: latest.size,
+    raw: latest
+  })
 }
 
 const handleFileRemove = () => {
@@ -381,6 +397,17 @@ const handleNext = () => {
 .success-alert {
   border: none;
   background: linear-gradient(135deg, rgba(103, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+}
+
+.error-alert {
+  border-radius: 12px;
+}
+
+.error-detail {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  margin-top: 6px;
 }
 
 .success-text {

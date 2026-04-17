@@ -1,0 +1,15 @@
+# Copy to server/config.yaml and set real credentials (server/config.yaml is gitignored).
+databases:
+  - id: local_mysql
+    name: 本地 MySQL
+    host: localhost
+    port: 3306
+    username: root
+    password: your_password
+    database: your_database
+
+upload:
+  tempPath: ./uploads
+
+import:
+  batchSize: 5000
