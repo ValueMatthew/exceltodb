@@ -26,6 +26,7 @@
                 <el-select
                   v-model="manualTableName"
                   filterable
+                  allow-create
                   clearable
                   placeholder="请选择或输入目标表名称"
                   class="manual-select"
@@ -280,6 +281,7 @@ const manualAlertType = computed(() => {
   if ((manualValidationResult.value.score ?? 0) < (manualValidationResult.value.threshold ?? 90)) {
     return 'warning'
   }
+  if (manualError.value) return 'error'
   return 'success'
 })
 
@@ -292,6 +294,8 @@ const manualAlertTitle = computed(() => {
   if (score < threshold) {
     return '目标表存在，但匹配度未达标'
   }
+
+  if (manualError.value) return '目标表校验失败'
 
   return '目标表校验通过'
 })
@@ -385,7 +389,14 @@ const validateManualTable = async () => {
       return
     }
 
-    manualTableName.value = response.data.table?.tableName || manualTableName.value.trim()
+    if (!response.data.table) {
+      manualError.value = '服务器未返回表结构信息，请稍后重试'
+      clearSelectedTableForMode(MODE_MANUAL)
+      ElMessage.error(manualError.value)
+      return
+    }
+
+    manualTableName.value = response.data.table.tableName || manualTableName.value.trim()
     setSelectedTableForMode(response.data.table, MODE_MANUAL)
     ElMessage.success(`校验通过，匹配度 ${response.data.score}%`)
   } catch (err) {
