@@ -12,6 +12,7 @@
 
     <el-upload
       ref="uploadRef"
+      v-model:file-list="uploadFileList"
       class="upload-area"
       drag
       :action="uploadUrl"
@@ -129,7 +130,7 @@
 </template>
 
 <script setup>
-import { ref, inject, computed } from 'vue'
+import { ref, inject, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -137,6 +138,7 @@ const emit = defineEmits(['next', 'back'])
 const uploadedFile = inject('uploadedFile')
 
 const uploadRef = ref(null)
+const uploadFileList = ref([])
 const uploadUrl = '/api/upload'
 const currentFile = ref(null)
 const fileInfo = ref(null)
@@ -161,7 +163,50 @@ const resetUploadState = () => {
   uploadedFile.value = null
   selectedSheetIndex.value = 0
   sheetSwitchLoading.value = false
+  uploadFileList.value = []
 }
+
+const displayNameFromServerFilename = (serverName) => {
+  if (!serverName) return ''
+  const i = serverName.indexOf('_')
+  return i > 0 ? serverName.slice(i + 1) : serverName
+}
+
+/** 从预览等步骤返回时：父级仍保留 uploadedFile，恢复本页 UI */
+const hydrateFromParent = () => {
+  const uf = uploadedFile.value
+  if (!uf?.filename || !uf.columns?.length) return
+
+  const displayName = uf.clientFileName || displayNameFromServerFilename(uf.filename)
+  const size = typeof uf.clientFileSize === 'number' ? uf.clientFileSize : 0
+  fileInfo.value = {
+    name: displayName,
+    size,
+    type: ''
+  }
+  parseResult.value = {
+    filename: uf.filename,
+    sheetName: uf.sheetName,
+    rowCount: uf.rowCount,
+    columns: uf.columns,
+    sheetIndex: uf.sheetIndex ?? 0,
+    sheets: uf.sheets
+  }
+  selectedSheetIndex.value = uf.sheetIndex ?? 0
+  canProceed.value = true
+  uploadFileList.value = [
+    {
+      name: displayName,
+      size,
+      status: 'success',
+      uid: Date.now()
+    }
+  ]
+}
+
+onMounted(() => {
+  hydrateFromParent()
+})
 
 const handleFileChange = async (file) => {
   // 新选择文件时，清理旧结果 & 中断上一次上传
@@ -193,8 +238,19 @@ const handleFileChange = async (file) => {
     canProceed.value = true
     uploadedFile.value = {
       filename: res.data?.filename,
-      ...res.data
+      ...res.data,
+      clientFileName: file.name,
+      clientFileSize: file.size
     }
+    uploadFileList.value = [
+      {
+        name: file.name,
+        size: file.size,
+        status: 'success',
+        uid: file.uid,
+        raw: file.raw
+      }
+    ]
     ElMessage.success(`上传成功：${fileInfo.value?.name || ''}`.trim())
   } catch (err) {
     // 主动中断不提示错误
@@ -220,6 +276,7 @@ const handleFileRemove = () => {
   uploadedFile.value = null
   selectedSheetIndex.value = 0
   sheetSwitchLoading.value = false
+  uploadFileList.value = []
 }
 
 const onSheetIndexChange = (index) => {
@@ -250,7 +307,9 @@ const loadPreviewForSheet = async (sheetIndex) => {
       sheetName: res.data.sheetName,
       rowCount: res.data.totalRows,
       columns: res.data.columns,
-      sheets
+      sheets,
+      clientFileName: uploadedFile.value?.clientFileName,
+      clientFileSize: uploadedFile.value?.clientFileSize
     }
   } catch (err) {
     ElMessage.error(err.response?.data?.message || '加载所选工作表失败')

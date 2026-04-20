@@ -26,7 +26,7 @@
       <div class="content-card">
         <transition name="fade-slide" mode="out-in">
           <DbSelector v-if="currentStep === 0" @next="handleDbNext" />
-          <FileUpload v-else-if="currentStep === 1" @next="handleUploadNext" @back="currentStep--" />
+          <FileUpload v-else-if="currentStep === 1" @next="handleUploadNext" @back="handleUploadStepBack" />
           <DataPreview v-else-if="currentStep === 2" @next="handlePreviewNext" @back="currentStep--" />
           <TableRecommend v-else-if="currentStep === 3" @next="handleTableNext" @back="currentStep--" />
           <ImportProgress
@@ -75,6 +75,15 @@ const stepsActive = computed(() => {
 const handleDbNext = (db) => {
   selectedDb.value = db
   currentStep.value = 1
+}
+
+/** 从上传页返回选库：清空文件与后续步骤状态，避免换库后误恢复旧上传 */
+const handleUploadStepBack = () => {
+  currentStep.value = 0
+  uploadedFile.value = null
+  previewData.value = null
+  selectedTable.value = null
+  importParams.value = {}
 }
 
 const handleUploadNext = (file) => {
