@@ -43,7 +43,8 @@ npm run build                 # Production build
 ### Data Flow
 1. User selects database (from `config.yaml`) → tests connection
 2. User uploads Excel/CSV → parsed and saved to temp file
-3. System previews first 100 rows
+3. If Excel has multiple sheets: user selects which sheet to import (default: first sheet)
+4. System previews first 100 rows (by `sheetIndex`, default 0)
 4. TableMatcherService calculates best match by column match rate (≥90%). Columns with default values or `ON UPDATE` (e.g. `update_time`) are excluded from matching. Primary keys are NOT excluded.
 5. If match (≥90%): user confirms the recommended table and proceeds to import settings. If no match (<90%): user is prompted to check their file or contact IT. No manual table selection or create table options.
 6. ImportService runs batch INSERT (5000 rows/batch) with transaction
@@ -66,7 +67,7 @@ databases:
 |--------|------|-------------|
 | GET | /api/databases | List configured databases |
 | POST | /api/upload | Upload Excel/CSV file |
-| GET | /api/preview/{filename} | Get first 100 rows |
+| GET | /api/preview/{filename} | Get first 100 rows (supports `sheetIndex`, default 0) |
 | GET | /api/tables/{databaseId} | List tables with column info |
 | POST | /api/recommend | Get best-matching table recommendation |
 | POST | /api/import | Execute data import |

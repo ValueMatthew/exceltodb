@@ -35,12 +35,13 @@
 |------|------|
 | 支持格式 | .xlsx、.xls、.csv |
 | 文件大小限制 | 最大 100MB |
-| Sheet支持 | 仅支持单个Sheet（暂不考虑多Sheet） |
+| Sheet支持 | 支持多Sheet：当Excel包含多个Sheet时，用户需在上传页选择要导入的Sheet；CSV视为单Sheet |
 
 **交互流程**：
 1. 用户拖拽或点击上传文件
-2. 系统解析文件并显示基本信息（文件名、Sheet名、行数）
-3. 用户点击"下一步"进入数据预览
+2. 系统解析文件并显示基本信息（文件名、Sheet名、行数；若为Excel则返回Sheet列表）
+3. 若Excel包含多个Sheet：用户在上传页选择要导入的Sheet（默认第一个Sheet）
+4. 用户点击"下一步"进入数据预览
 
 ### 2.3 数据预览
 | 规格 | 说明 |
@@ -154,7 +155,7 @@ exceltodb/
 |------|------|------|
 | GET | /api/databases | 获取可用数据库列表 |
 | POST | /api/upload | 上传Excel/CSV文件 |
-| GET | /api/preview/{filename} | 获取预览数据 |
+| GET | /api/preview/{filename} | 获取预览数据（支持sheetIndex参数） |
 | GET | /api/tables/{databaseId} | 获取所有表及列信息（含主键） |
 | POST | /api/recommend | 获取推荐表 |
 | POST | /api/import | 执行数据导入 |
@@ -167,7 +168,8 @@ exceltodb/
   "databaseId": "prod_erp",
   "tableName": "orders",
   "importMode": "INCREMENTAL",
-  "conflictStrategy": "UPDATE"
+  "conflictStrategy": "UPDATE",
+  "sheetIndex": 0
 }
 ```
 
@@ -204,6 +206,6 @@ exceltodb/
 ---
 
 ## 5. 后续扩展方向（本期不做）
-- 多Sheet支持
+- 多Sheet同时导入/合并导入
 - 导入历史记录
 - 用户认证与权限管理

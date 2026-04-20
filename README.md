@@ -8,6 +8,7 @@
 - **智能推荐**：根据 Excel 列名智能推荐最匹配的数据表（≥90%匹配度）
 - **多种导入模式**：支持清空导入和增量导入
 - **主键冲突处理**：支持报错、更新（UPSERT）、忽略三种策略
+- **多Sheet支持**：当Excel包含多个Sheet时，支持在上传页选择要导入的Sheet（默认第一个）
 
 ## 技术栈
 
@@ -83,6 +84,7 @@ npm run dev
 
 1. 选择目标数据库
 2. 上传 Excel/CSV 文件
+3. 若Excel包含多个Sheet：在上传页选择要导入的Sheet
 3. 预览数据
 4. 系统根据 Excel 列名智能推荐最匹配的数据表（匹配度≥90%）。若未匹配到合适的表，请检查导入文件或联系IT人员
 5. 确认推荐表后设置导入模式并开始导入
@@ -119,7 +121,7 @@ npm run dev
 | GET | /api/databases | 获取可用数据库列表 |
 | GET | /api/databases/{id}/test | 测试数据库连接 |
 | POST | /api/upload | 上传文件 |
-| GET | /api/preview/{filename} | 获取预览数据 |
+| GET | /api/preview/{filename} | 获取预览数据（可选参数 sheetIndex，默认0） |
 | GET | /api/tables/{databaseId} | 获取所有表及列信息 |
 | POST | /api/recommend | 获取推荐表 |
 | POST | /api/import | 执行数据导入 |
