@@ -68,7 +68,7 @@
 
         <div v-else key="recommend" class="recommend-mode">
           <div v-if="loading" class="loading-state">
-            <el-icon class="is-loading"><loading /></el-icon>
+            <el-icon class="is-loading"><Loading /></el-icon>
             <span>正在分析数据表匹配度...</span>
           </div>
 
@@ -265,6 +265,7 @@
 </template>
 
 <script setup>
+import { Loading } from '@element-plus/icons-vue'
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
@@ -287,6 +288,7 @@ const manualValidating = ref(false)
 const manualValidationResult = ref(null)
 const manualError = ref('')
 const manualSelectedTableInfo = ref(null)
+const lastValidatedManualTableName = ref('')
 
 const loading = ref(false)
 const recommendations = ref([])
@@ -464,7 +466,7 @@ const loadRecommendation = async () => {
     if (recommendRes.data) {
       recommendations.value = recommendRes.data.recommendations || []
       topScore.value = recommendRes.data.topScore || 0
-      recommendThreshold.value = recommendRes.data.threshold || 90
+      recommendThreshold.value = recommendRes.data.threshold ?? 90
       recommendLoaded.value = true
 
       if (!selectedTableName.value && recommendations.value.length > 0) {
@@ -520,7 +522,9 @@ const validateManualTable = async () => {
       return
     }
 
-    manualTableName.value = response.data.table.tableName || manualTableName.value.trim()
+    const canonicalTableName = response.data.table.tableName || manualTableName.value.trim()
+    lastValidatedManualTableName.value = canonicalTableName
+    manualTableName.value = canonicalTableName
     setSelectedTableForMode(response.data.table, MODE_MANUAL)
     ElMessage.success(`校验通过，匹配度 ${response.data.score}%`)
   } catch (err) {
@@ -592,6 +596,17 @@ watch(mode, (nextMode) => {
 watch(selectedTableInfo, () => {
   previewDialogVisible.value = false
   resetPreviewState()
+})
+
+watch(manualTableName, (nextValue) => {
+  const normalizedName = nextValue?.trim() ?? ''
+  if (normalizedName === lastValidatedManualTableName.value) {
+    return
+  }
+
+  manualValidationResult.value = null
+  manualError.value = ''
+  clearSelectedTableForMode(MODE_MANUAL)
 })
 
 onMounted(() => {
