@@ -3,6 +3,7 @@ package com.exceltodb.service;
 import com.exceltodb.config.AppConfig;
 import com.exceltodb.config.DataSourceConfig;
 import com.exceltodb.model.CreateTableRequest;
+import com.exceltodb.model.ImportStage;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
 import com.exceltodb.model.TableInfo;
@@ -28,19 +29,26 @@ public class ImportService {
     private final ExcelParserService excelParserService;
     private final DbService dbService;
     private final AppConfig appConfig;
+    private final ImportHeartbeatStore heartbeatStore;
 
     public ImportService(DataSourceConfig dataSourceConfig, ExcelParserService excelParserService,
-                        DbService dbService, AppConfig appConfig) {
+                        DbService dbService, AppConfig appConfig, ImportHeartbeatStore heartbeatStore) {
         this.dataSourceConfig = dataSourceConfig;
         this.excelParserService = excelParserService;
         this.dbService = dbService;
         this.appConfig = appConfig;
+        this.heartbeatStore = heartbeatStore;
     }
 
     public ImportResult importData(ImportRequest request) throws IOException, InvalidFormatException {
         ImportResult result = new ImportResult();
 
         DataSource ds = dataSourceConfig.getDataSource(request.getDatabaseId());
+        String requestId = request.getRequestId();
+        if (requestId != null && !requestId.isBlank()) {
+            heartbeatStore.start(requestId);
+        }
+        long lastProcessedRows = 0;
 
         try (Connection conn = ds.getConnection()) {
             conn.setAutoCommit(false);
@@ -48,6 +56,9 @@ public class ImportService {
             try {
                 // Handle truncate mode
                 if ("TRUNCATE".equals(request.getImportMode())) {
+                    if (requestId != null && !requestId.isBlank()) {
+                        heartbeatStore.update(requestId, ImportStage.TRUNCATE, 0, "");
+                    }
                     try (Statement stmt = conn.createStatement()) {
                         stmt.execute("TRUNCATE TABLE `" + request.getTableName() + "`");
                     }
@@ -65,11 +76,17 @@ public class ImportService {
 
                 CsvStream csvStream = null;
                 if (isCsv) {
+                    if (requestId != null && !requestId.isBlank()) {
+                        heartbeatStore.update(requestId, ImportStage.READING, 0, "");
+                    }
                     // Stream CSV to avoid reading all rows into memory
                     csvStream = openCsvStream(filename);
                     headers = csvStream.header;
                     rowsIterable = csvStream;
                 } else {
+                    if (requestId != null && !requestId.isBlank()) {
+                        heartbeatStore.update(requestId, ImportStage.READING, 0, "");
+                    }
                     // Excel path: keep existing reader for now (POI streaming refactor can be done later)
                     List<String[]> allData = excelParserService.readAllData(filename, sheetIndex);
                     if (allData.isEmpty()) {
@@ -111,6 +128,10 @@ public class ImportService {
 
                     for (String[] row : rowsIterable) {
                         rowIndex++;
+                        lastProcessedRows = rowIndex;
+                        if (requestId != null && !requestId.isBlank() && (rowIndex % 500 == 0)) {
+                            heartbeatStore.update(requestId, ImportStage.INSERTING, rowIndex, "");
+                        }
 
                         // Skip if row has fewer columns than headers
                         if (row.length < headers.length) {
@@ -145,6 +166,10 @@ public class ImportService {
                     result.setImportedRows(importedRows);
                     result.setSuccess(true);
                     result.setMessage("导入成功");
+
+                    if (requestId != null && !requestId.isBlank()) {
+                        heartbeatStore.update(requestId, ImportStage.COMMITTING, rowIndex, "");
+                    }
                 } finally {
                     if (csvStream != null) {
                         try { csvStream.close(); } catch (Exception ignored) {}
@@ -152,9 +177,15 @@ public class ImportService {
                 }
 
                 conn.commit();
+                if (requestId != null && !requestId.isBlank()) {
+                    heartbeatStore.success(requestId, lastProcessedRows);
+                }
 
             } catch (Exception e) {
                 conn.rollback();
+                if (requestId != null && !requestId.isBlank()) {
+                    heartbeatStore.error(requestId, lastProcessedRows, e.getMessage());
+                }
                 throw e;
             }
 
