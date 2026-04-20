@@ -57,9 +57,10 @@ public class ExcelController {
 
     @GetMapping("/preview/{filename}")
     public ResponseEntity<PreviewResult> getPreview(@PathVariable String filename,
-                                                     @RequestParam(defaultValue = "100") int maxRows) {
+                                                     @RequestParam(defaultValue = "100") int maxRows,
+                                                     @RequestParam(defaultValue = "0") int sheetIndex) {
         try {
-            PreviewResult result = excelParserService.getPreview(filename, maxRows);
+            PreviewResult result = excelParserService.getPreview(filename, maxRows, sheetIndex);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
@@ -83,7 +84,8 @@ public class ExcelController {
             // Prefer client-provided columns to avoid re-reading the file (preview step already parsed them)
             List<String> excelColumns = request.getColumns();
             if (excelColumns == null || excelColumns.isEmpty()) {
-                PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100);
+                int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
+                PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100, sheetIndex);
                 excelColumns = preview.getColumns();
             }
 
@@ -149,5 +151,8 @@ public class ExcelController {
         public void setFilename(String filename) { this.filename = filename; }
         public List<String> getColumns() { return columns; }
         public void setColumns(List<String> columns) { this.columns = columns; }
+        private Integer sheetIndex;
+        public Integer getSheetIndex() { return sheetIndex; }
+        public void setSheetIndex(Integer sheetIndex) { this.sheetIndex = sheetIndex; }
     }
 }

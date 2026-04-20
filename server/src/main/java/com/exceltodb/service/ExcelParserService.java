@@ -3,6 +3,7 @@ package com.exceltodb.service;
 import com.exceltodb.config.AppConfig;
 import com.exceltodb.model.ParseResult;
 import com.exceltodb.model.PreviewResult;
+import com.exceltodb.model.SheetSummary;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 import org.apache.poi.ss.usermodel.*;
@@ -57,7 +58,7 @@ public class ExcelParserService {
             uploadedFiles.put(uniqueFilename, filePath);
             // Drop any stale cache for the same generated name (defensive)
             parseCache.remove(uniqueFilename);
-            previewCache.remove(uniqueFilename);
+            previewCache.keySet().removeIf(k -> k.equals(uniqueFilename) || k.startsWith(uniqueFilename + "#"));
 
             // Parse based on extension
             String lowerName = originalFilename.toLowerCase();
@@ -79,15 +80,31 @@ public class ExcelParserService {
 
     private ParseResult parseExcel(Path filePath, String filename) throws IOException, InvalidFormatException {
         try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
-            Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = sheet.getRow(0);
+            int n = workbook.getNumberOfSheets();
+            if (n == 0) {
+                throw new RuntimeException("Excel文件不包含任何工作表");
+            }
 
+            List<SheetSummary> summaries = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                Sheet s = workbook.getSheetAt(i);
+                SheetSummary ss = new SheetSummary();
+                ss.setIndex(i);
+                ss.setName(s.getSheetName());
+                ss.setRowCount(s.getLastRowNum());
+                summaries.add(ss);
+            }
+
+            Sheet sheet = requireSheet(workbook, 0);
+            Row headerRow = sheet.getRow(0);
             if (headerRow == null) {
                 throw new RuntimeException("Excel文件为空或没有表头");
             }
 
             ParseResult result = new ParseResult();
             result.setFilename(filename);
+            result.setSheetIndex(0);
+            result.setSheets(summaries);
 
             int lastRowNum = sheet.getLastRowNum();
             result.setRowCount(lastRowNum);
@@ -107,6 +124,18 @@ public class ExcelParserService {
         }
     }
 
+    private Sheet requireSheet(Workbook workbook, int sheetIndex) {
+        int n = workbook.getNumberOfSheets();
+        if (sheetIndex < 0 || sheetIndex >= n) {
+            throw new RuntimeException("工作表索引无效: " + sheetIndex + "（共 " + n + " 个工作表）");
+        }
+        return workbook.getSheetAt(sheetIndex);
+    }
+
+    private static String previewCacheKey(String filename, int sheetIndex) {
+        return filename + "#" + sheetIndex;
+    }
+
     private ParseResult parseCsv(Path filePath, String filename) throws IOException {
         try (CSVReader reader = createCsvReader(filePath)) {
             String[] header = reader.readNext();
@@ -122,6 +151,8 @@ public class ExcelParserService {
 
             ParseResult result = new ParseResult();
             result.setFilename(filename);
+            result.setSheetIndex(0);
+            result.setSheets(null);
             result.setRowCount(rowCount); // exclude header
             result.setColumns(Arrays.asList(header));
             result.setSheetName("Sheet1");
@@ -132,10 +163,10 @@ public class ExcelParserService {
         }
     }
 
-    public PreviewResult getPreview(String filename, int maxRows) throws IOException, InvalidFormatException {
-        // Cache only for the standard preview size to maximize hit rate
+    public PreviewResult getPreview(String filename, int maxRows, int sheetIndex) throws IOException, InvalidFormatException {
+        String cacheKey = previewCacheKey(filename, sheetIndex);
         if (maxRows == DEFAULT_PREVIEW_ROWS) {
-            PreviewResult cached = previewCache.get(filename);
+            PreviewResult cached = previewCache.get(cacheKey);
             if (cached != null) return cached;
         }
 
@@ -147,7 +178,7 @@ public class ExcelParserService {
         String lowerName = filename.toLowerCase();
         PreviewResult result;
         if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-            result = getExcelPreview(filePath, filename, maxRows);
+            result = getExcelPreview(filePath, filename, maxRows, sheetIndex);
         } else if (lowerName.endsWith(".csv")) {
             result = getCsvPreview(filePath, filename, maxRows);
         } else {
@@ -155,18 +186,22 @@ public class ExcelParserService {
         }
 
         if (maxRows == DEFAULT_PREVIEW_ROWS) {
-            previewCache.put(filename, result);
+            previewCache.put(cacheKey, result);
         }
         return result;
     }
 
-    private PreviewResult getExcelPreview(Path filePath, String filename, int maxRows) throws IOException, InvalidFormatException {
+    private PreviewResult getExcelPreview(Path filePath, String filename, int maxRows, int sheetIndex) throws IOException, InvalidFormatException {
         try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
-            Sheet sheet = workbook.getSheetAt(0);
+            Sheet sheet = requireSheet(workbook, sheetIndex);
             Row headerRow = sheet.getRow(0);
+            if (headerRow == null) {
+                throw new RuntimeException("Excel该工作表为空或没有表头");
+            }
 
             PreviewResult result = new PreviewResult();
             result.setFilename(filename);
+            result.setSheetIndex(sheetIndex);
             result.setTotalRows(sheet.getLastRowNum());
             result.setSheetName(sheet.getSheetName());
 
@@ -204,6 +239,7 @@ public class ExcelParserService {
         try (CSVReader reader = createCsvReader(filePath)) {
             PreviewResult result = new PreviewResult();
             result.setFilename(filename);
+            result.setSheetIndex(0);
             result.setSheetName("Sheet1");
 
             String[] header = reader.readNext();
@@ -266,9 +302,7 @@ public class ExcelParserService {
         };
     }
 
-    public List<String[]> readAllData(String filename) throws IOException, InvalidFormatException {
-        // If we've already previewed, we can reuse the parsed columns for header length, but
-        // readAllData is still a full read; caller (ImportService) should prefer streaming where possible.
+    public List<String[]> readAllData(String filename, int sheetIndex) throws IOException, InvalidFormatException {
         Path filePath = uploadedFiles.get(filename);
         if (filePath == null) {
             throw new RuntimeException("文件不存在: " + filename);
@@ -276,7 +310,7 @@ public class ExcelParserService {
 
         String lowerName = filename.toLowerCase();
         if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-            return readExcelAllData(filePath);
+            return readExcelAllData(filePath, sheetIndex);
         } else if (lowerName.endsWith(".csv")) {
             return readCsvAllData(filePath);
         } else {
@@ -284,11 +318,11 @@ public class ExcelParserService {
         }
     }
 
-    private List<String[]> readExcelAllData(Path filePath) throws IOException, InvalidFormatException {
+    private List<String[]> readExcelAllData(Path filePath, int sheetIndex) throws IOException, InvalidFormatException {
         List<String[]> data = new ArrayList<>();
 
         try (Workbook workbook = WorkbookFactory.create(filePath.toFile())) {
-            Sheet sheet = workbook.getSheetAt(0);
+            Sheet sheet = requireSheet(workbook, sheetIndex);
             Row headerRow = sheet.getRow(0);
             if (headerRow == null) return data;
 

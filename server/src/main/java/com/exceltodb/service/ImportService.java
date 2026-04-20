@@ -57,6 +57,7 @@ public class ImportService {
                 if (filename == null || filename.isBlank()) {
                     throw new RuntimeException("文件名为空");
                 }
+                int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
 
                 String[] headers;
                 Iterable<String[]> rowsIterable;
@@ -70,7 +71,7 @@ public class ImportService {
                     rowsIterable = csvStream;
                 } else {
                     // Excel path: keep existing reader for now (POI streaming refactor can be done later)
-                    List<String[]> allData = excelParserService.readAllData(filename);
+                    List<String[]> allData = excelParserService.readAllData(filename, sheetIndex);
                     if (allData.isEmpty()) {
                         throw new RuntimeException("文件没有数据");
                     }
@@ -305,10 +306,11 @@ public class ImportService {
 
     public String createTable(CreateTableRequest request) throws IOException, InvalidFormatException {
         DataSource ds = dataSourceConfig.getDataSource(request.getDatabaseId());
+        int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
 
         try (Connection conn = ds.getConnection()) {
             // Analyze Excel file to get column info
-            List<String[]> allData = excelParserService.readAllData(request.getFilename());
+            List<String[]> allData = excelParserService.readAllData(request.getFilename(), sheetIndex);
             if (allData.isEmpty()) {
                 throw new RuntimeException("文件没有数据");
             }

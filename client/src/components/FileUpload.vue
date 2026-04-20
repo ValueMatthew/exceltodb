@@ -62,6 +62,25 @@
 
     <transition name="el-fade-in">
       <div v-if="parseResult" class="parse-result">
+        <div v-if="showSheetPicker" class="sheet-picker">
+          <p class="sheet-picker-label">该工作簿包含多个 Sheet，请选择要导入的工作表：</p>
+          <el-radio-group
+            v-model="selectedSheetIndex"
+            class="sheet-radio-group"
+            @change="onSheetIndexChange"
+          >
+            <el-radio
+              v-for="s in parseResult.sheets"
+              :key="s.index"
+              :label="s.index"
+              border
+              class="sheet-radio"
+            >
+              <span class="sheet-radio-title">{{ s.name }}</span>
+              <span class="sheet-radio-meta">（约 {{ s.rowCount }} 行）</span>
+            </el-radio>
+          </el-radio-group>
+        </div>
         <el-alert
           type="success"
           :closable="false"
@@ -74,6 +93,7 @@
             </span>
           </template>
         </el-alert>
+        <p v-if="sheetSwitchLoading" class="sheet-switch-hint">正在切换工作表…</p>
       </div>
     </transition>
 
@@ -99,7 +119,7 @@
         type="primary"
         size="large"
         @click="handleNext"
-        :disabled="!canProceed || uploading"
+        :disabled="!canProceed || uploading || sheetSwitchLoading"
         class="next-btn"
       >
         下一步 →
@@ -109,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, inject } from 'vue'
+import { ref, inject, computed } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -124,14 +144,23 @@ const parseResult = ref(null)
 const parseError = ref(null)
 const canProceed = ref(false)
 const uploading = ref(false)
+const selectedSheetIndex = ref(0)
+const sheetSwitchLoading = ref(false)
 let uploadSeq = 0
 let abortController = null
+
+const showSheetPicker = computed(() => {
+  const sheets = parseResult.value?.sheets
+  return Array.isArray(sheets) && sheets.length > 1
+})
 
 const resetUploadState = () => {
   parseError.value = null
   parseResult.value = null
   canProceed.value = false
   uploadedFile.value = null
+  selectedSheetIndex.value = 0
+  sheetSwitchLoading.value = false
 }
 
 const handleFileChange = async (file) => {
@@ -160,6 +189,7 @@ const handleFileChange = async (file) => {
     })
     if (seq !== uploadSeq) return
     parseResult.value = res.data
+    selectedSheetIndex.value = res.data.sheetIndex ?? 0
     canProceed.value = true
     uploadedFile.value = {
       filename: res.data?.filename,
@@ -188,6 +218,45 @@ const handleFileRemove = () => {
   canProceed.value = false
   uploading.value = false
   uploadedFile.value = null
+  selectedSheetIndex.value = 0
+  sheetSwitchLoading.value = false
+}
+
+const onSheetIndexChange = (index) => {
+  loadPreviewForSheet(Number(index))
+}
+
+const loadPreviewForSheet = async (sheetIndex) => {
+  const fn = uploadedFile.value?.filename || parseResult.value?.filename
+  if (!fn) return
+  sheetSwitchLoading.value = true
+  try {
+    const res = await axios.get(`/api/preview/${encodeURIComponent(fn)}`, {
+      params: { sheetIndex, maxRows: 100 }
+    })
+    const sheets = parseResult.value?.sheets
+    parseResult.value = {
+      ...parseResult.value,
+      sheetIndex: res.data.sheetIndex ?? sheetIndex,
+      sheetName: res.data.sheetName,
+      rowCount: res.data.totalRows,
+      columns: res.data.columns,
+      sheets
+    }
+    uploadedFile.value = {
+      ...uploadedFile.value,
+      filename: fn,
+      sheetIndex: res.data.sheetIndex ?? sheetIndex,
+      sheetName: res.data.sheetName,
+      rowCount: res.data.totalRows,
+      columns: res.data.columns,
+      sheets
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.message || '加载所选工作表失败')
+  } finally {
+    sheetSwitchLoading.value = false
+  }
 }
 
 const formatSize = (bytes) => {
@@ -371,6 +440,50 @@ const handleNext = () => {
   font-size: 14px;
   color: #303133;
   font-weight: 500;
+}
+
+.sheet-picker {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #f5f7ff;
+  border-radius: 12px;
+  border: 1px solid #e4e7ed;
+}
+
+.sheet-picker-label {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.sheet-radio-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sheet-radio {
+  margin-right: 0;
+  width: 100%;
+}
+
+.sheet-radio-title {
+  font-weight: 600;
+  color: #303133;
+}
+
+.sheet-radio-meta {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.sheet-switch-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #909399;
 }
 
 .parse-result,

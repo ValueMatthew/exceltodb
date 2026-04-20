@@ -105,7 +105,10 @@ const loadPreview = async () => {
 
   loading.value = true
   try {
-    const res = await axios.get(`/api/preview/${uploadedFile.value.filename}`)
+    const sheetIndex = uploadedFile.value?.sheetIndex ?? 0
+    const res = await axios.get(`/api/preview/${encodeURIComponent(uploadedFile.value.filename)}`, {
+      params: { maxRows: 100, sheetIndex }
+    })
     previewData.value = res.data
   } catch (err) {
     ElMessage.error('加载预览数据失败')

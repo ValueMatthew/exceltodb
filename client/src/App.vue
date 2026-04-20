@@ -93,7 +93,8 @@ const handleTableNext = (table) => {
     databaseId: selectedDb.value.id,
     tableName: table.name,
     importMode: table.importMode || 'INCREMENTAL',
-    conflictStrategy: table.conflictStrategy || 'ERROR'
+    conflictStrategy: table.conflictStrategy || 'ERROR',
+    sheetIndex: uploadedFile.value.sheetIndex ?? 0
   }
   importDone.value = false
   currentStep.value = 4

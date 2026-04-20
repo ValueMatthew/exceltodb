@@ -167,6 +167,7 @@ const loadRecommendation = async () => {
     const recommendRes = await axios.post('/api/recommend', {
       databaseId: selectedDb.value.id,
       filename: uploadedFile.value?.filename,
+      sheetIndex: uploadedFile.value?.sheetIndex ?? 0,
       columns: previewData.value?.columns || []
     })
 
