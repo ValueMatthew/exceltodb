@@ -124,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -197,9 +197,11 @@ const stopPulse = () => {
 }
 
 const startImport = async () => {
+  // Ensure UI renders "importing" state before the request begins.
   status.value = 'importing'
   detailText.value = '已提交导入请求，正在等待服务器写入完成...'
   startPulse()
+  await nextTick()
 
   try {
     const res = await axios.post('/api/import', props.params)
