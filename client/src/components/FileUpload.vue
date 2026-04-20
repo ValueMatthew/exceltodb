@@ -1,5 +1,16 @@
 <template>
   <div class="file-upload">
+    <div v-if="overlayVisible" class="loading-overlay" role="status" aria-live="polite">
+      <div class="loading-card">
+        <div class="loading-spinner" />
+        <div class="loading-title">{{ overlayTitle }}</div>
+        <div class="loading-subtitle">文件较大时可能需要一些时间，请稍候…</div>
+        <div class="loading-actions">
+          <el-button v-if="uploading" type="danger" @click="cancelUpload">取消上传</el-button>
+        </div>
+      </div>
+    </div>
+
     <div class="section-header">
       <div class="section-icon upload-icon-bg">
         <span class="icon-text">📤</span>
@@ -156,6 +167,13 @@ const showSheetPicker = computed(() => {
   return Array.isArray(sheets) && sheets.length > 1
 })
 
+const overlayVisible = computed(() => uploading.value || sheetSwitchLoading.value)
+const overlayTitle = computed(() => {
+  if (uploading.value) return '正在上传并解析…'
+  if (sheetSwitchLoading.value) return '正在切换工作表…'
+  return '处理中…'
+})
+
 const resetUploadState = () => {
   parseError.value = null
   parseResult.value = null
@@ -207,6 +225,25 @@ const hydrateFromParent = () => {
 onMounted(() => {
   hydrateFromParent()
 })
+
+const cancelUpload = () => {
+  // Bump sequence so any late responses are ignored.
+  uploadSeq++
+  if (abortController) {
+    abortController.abort()
+    abortController = null
+  }
+  uploading.value = false
+  sheetSwitchLoading.value = false
+  parseError.value = null
+  parseResult.value = null
+  canProceed.value = false
+  uploadedFile.value = null
+  currentFile.value = null
+  fileInfo.value = null
+  uploadFileList.value = []
+  ElMessage.info('已取消上传')
+}
 
 const handleFileChange = async (file) => {
   // 新选择文件时，清理旧结果 & 中断上一次上传
@@ -352,6 +389,63 @@ const handleNext = () => {
 .file-upload {
   max-width: 700px;
   margin: 0 auto;
+  position: relative;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(2px);
+  border-radius: 16px;
+}
+
+.loading-card {
+  width: min(420px, 92%);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #ebeef5;
+  border-radius: 16px;
+  padding: 22px 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 12px auto;
+  border-radius: 999px;
+  border: 4px solid rgba(102, 126, 234, 0.22);
+  border-top-color: #667eea;
+  animation: spin 0.9s linear infinite;
+}
+
+.loading-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #303133;
+  margin-bottom: 6px;
+}
+
+.loading-subtitle {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 14px;
+}
+
+.loading-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .section-header {
