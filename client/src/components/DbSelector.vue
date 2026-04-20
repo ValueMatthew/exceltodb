@@ -50,6 +50,9 @@
           <div class="detail-item">
             <span class="detail-icon">📍</span>
             <span>{{ selectedDbInfo?.host }}:{{ selectedDbInfo?.port }}</span>
+            <el-icon v-if="connectionStatus === 'success'" class="conn-ok-icon" title="连接成功">
+              <CircleCheckFilled />
+            </el-icon>
           </div>
           <div class="detail-item">
             <span class="detail-icon">👤</span>
@@ -65,7 +68,6 @@
           </el-button>
         </template>
         <template v-else-if="connectionStatus === 'success'">
-          <el-result icon="success" title="连接成功" class="connection-result" />
           <el-button size="small" @click="testConnection" class="retest-btn">重新测试</el-button>
         </template>
         <template v-else-if="connectionStatus === 'failed'">
@@ -98,6 +100,7 @@
 import { ref, computed, inject, onMounted, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { CircleCheckFilled } from '@element-plus/icons-vue'
 
 const emit = defineEmits(['next'])
 const selectedDb = inject('selectedDb')
@@ -312,6 +315,11 @@ onBeforeUnmount(() => {
 
 .retest-btn {
   margin-top: 10px;
+}
+
+.conn-ok-icon {
+  margin-left: 8px;
+  color: #67c23a;
 }
 
 .actions {
