@@ -77,6 +77,15 @@ public class ExcelController {
         }
     }
 
+    @GetMapping("/tables/{databaseId}/names")
+    public ResponseEntity<List<String>> getTableNames(@PathVariable String databaseId) {
+        try {
+            return ResponseEntity.ok(dbService.getAllTableNames(databaseId));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
     @PostMapping("/recommend")
     public ResponseEntity<TableRecommendationResponse> getRecommendation(@RequestBody RecommendRequest request) {
         try {
