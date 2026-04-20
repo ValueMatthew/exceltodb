@@ -176,6 +176,12 @@
                 </el-radio-group>
               </el-form-item>
 
+              <el-form-item v-if="canPreview">
+                <el-button @click="openPreviewDialog" size="large" class="preview-btn">
+                  预览目标表(字段+5行)
+                </el-button>
+              </el-form-item>
+
               <el-form-item>
                 <el-button type="primary" @click="confirmImport" size="large" class="import-btn">
                   开始导入 →
@@ -186,6 +192,71 @@
         </div>
       </transition>
     </div>
+
+    <el-dialog
+      v-model="previewDialogVisible"
+      :title="previewDialogTitle"
+      width="900px"
+      destroy-on-close
+    >
+      <div class="preview-dialog-body">
+        <p class="preview-score-line">
+          匹配度 {{ activeMatchScore }}%（阈值 {{ activeThreshold }}%）
+        </p>
+
+        <div v-if="previewLoading" class="preview-state">
+          正在加载目标表预览...
+        </div>
+
+        <el-alert
+          v-else-if="previewError"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="previewError"
+        />
+
+        <template v-else>
+          <div class="preview-columns-section">
+            <div class="preview-section-title">字段列表</div>
+            <div class="preview-columns">
+              <el-tag
+                v-for="column in previewColumns"
+                :key="column"
+                size="small"
+                effect="plain"
+              >
+                {{ column }}
+              </el-tag>
+            </div>
+          </div>
+
+          <div class="preview-rows-section">
+            <div class="preview-section-title">样例数据（最多 5 行）</div>
+            <div v-if="previewRows.length === 0" class="preview-empty">
+              该表暂无数据
+            </div>
+            <el-table
+              v-else
+              :data="previewRows"
+              border
+              stripe
+              max-height="320"
+              class="preview-table"
+            >
+              <el-table-column
+                v-for="column in previewColumns"
+                :key="column"
+                :prop="column"
+                :label="column"
+                min-width="160"
+                show-overflow-tooltip
+              />
+            </el-table>
+          </div>
+        </template>
+      </div>
+    </el-dialog>
 
     <div class="actions">
       <el-button @click="$emit('back')" size="large">上一步</el-button>
@@ -228,6 +299,11 @@ const recommendSelectedTableInfo = ref(null)
 const selectedTableInfo = ref(null)
 const importMode = ref('INCREMENTAL')
 const conflictStrategy = ref('ERROR')
+const previewDialogVisible = ref(false)
+const previewLoading = ref(false)
+const previewError = ref('')
+const previewColumns = ref([])
+const previewRows = ref([])
 
 const backupKeywords = ['test', 'bak', 'back', 'full']
 
@@ -308,6 +384,54 @@ const manualAlertDescription = computed(() => {
   const threshold = manualValidationResult.value.threshold ?? 90
   return `匹配度 ${score}%，阈值 ${threshold}%`
 })
+
+const activeRecommendInfo = computed(() => {
+  if (recommendSelectedTableInfo.value?.name) {
+    return recommendations.value.find(
+      recommendation => recommendation.tableName === recommendSelectedTableInfo.value.name
+    ) || null
+  }
+
+  const selectedRecommendation = recommendations.value.find(
+    recommendation => recommendation.tableName === selectedTableName.value
+  )
+
+  if (selectedRecommendation) {
+    return selectedRecommendation
+  }
+
+  return null
+})
+
+const activeMatchScore = computed(() => {
+  if (mode.value === MODE_MANUAL) {
+    return manualValidationResult.value?.score ?? 0
+  }
+
+  return activeRecommendInfo.value?.score ?? 0
+})
+
+const activeThreshold = computed(() => {
+  if (mode.value === MODE_MANUAL) {
+    return manualValidationResult.value?.threshold ?? 90
+  }
+
+  return recommendThreshold.value ?? 90
+})
+
+const canPreview = computed(() => (
+  Boolean(selectedTableInfo.value) && activeMatchScore.value >= activeThreshold.value
+))
+
+const previewDialogTitle = computed(() => (
+  `目标表预览：${selectedTableInfo.value?.name || ''}`
+))
+
+const resetPreviewState = () => {
+  previewError.value = ''
+  previewColumns.value = []
+  previewRows.value = []
+}
 
 const loadManualTableNames = async () => {
   if (!selectedDb.value?.id || manualLoadingNames.value || manualOptions.value.length > 0) return
@@ -417,6 +541,33 @@ const selectChosenTable = () => {
   setSelectedTableForMode(chosen, MODE_RECOMMEND)
 }
 
+const openPreviewDialog = async () => {
+  if (!canPreview.value || !selectedDb.value?.id || !selectedTableInfo.value?.name) {
+    return
+  }
+
+  previewDialogVisible.value = true
+  previewLoading.value = true
+  resetPreviewState()
+
+  try {
+    const response = await axios.get('/api/table-preview', {
+      params: {
+        databaseId: selectedDb.value.id,
+        tableName: selectedTableInfo.value.name,
+        limit: 5
+      }
+    })
+
+    previewColumns.value = Array.isArray(response.data?.columns) ? response.data.columns : []
+    previewRows.value = Array.isArray(response.data?.rows) ? response.data.rows : []
+  } catch (err) {
+    previewError.value = '加载目标表预览失败，请稍后重试'
+  } finally {
+    previewLoading.value = false
+  }
+}
+
 const confirmImport = () => {
   selectedTable.value = {
     ...selectedTableInfo.value,
@@ -433,7 +584,14 @@ watch(mode, (nextMode) => {
     void loadRecommendation()
   }
 
+  previewDialogVisible.value = false
+  resetPreviewState()
   syncActiveSelectedTableInfo()
+})
+
+watch(selectedTableInfo, () => {
+  previewDialogVisible.value = false
+  resetPreviewState()
 })
 
 onMounted(() => {
@@ -658,12 +816,58 @@ onMounted(() => {
   max-width: 500px;
 }
 
+.preview-btn {
+  width: 100%;
+}
+
 .import-btn {
   width: 100%;
   height: 48px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
   font-size: 16px;
+}
+
+.preview-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.preview-score-line {
+  margin: 0;
+  color: #606266;
+  font-size: 14px;
+}
+
+.preview-state,
+.preview-empty {
+  padding: 20px 0;
+  color: #909399;
+  text-align: center;
+}
+
+.preview-columns-section,
+.preview-rows-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.preview-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-table {
+  width: 100%;
 }
 
 .actions {
