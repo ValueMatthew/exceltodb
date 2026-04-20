@@ -126,13 +126,17 @@ public class DbService {
 
         try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection();
              Statement stmt = conn.createStatement()) {
-            DatabaseMetaData metaData = conn.getMetaData();
-            String catalog = conn.getCatalog();
-
             List<String> columns = new ArrayList<>();
-            try (ResultSet colRs = metaData.getColumns(catalog, null, tableName, null)) {
-                while (colRs.next()) {
-                    columns.add(colRs.getString("COLUMN_NAME"));
+            String columnsSql = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+                    "ORDER BY ORDINAL_POSITION";
+            try (PreparedStatement colStmt = conn.prepareStatement(columnsSql)) {
+                colStmt.setString(1, conn.getCatalog());
+                colStmt.setString(2, tableName);
+                try (ResultSet colRs = colStmt.executeQuery()) {
+                    while (colRs.next()) {
+                        columns.add(colRs.getString("COLUMN_NAME"));
+                    }
                 }
             }
             response.setColumns(columns);
