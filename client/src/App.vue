@@ -68,8 +68,9 @@ provide('previewData', previewData)
 provide('selectedTable', selectedTable)
 
 const stepsActive = computed(() => {
-  // el-steps: active 大于最后一个索引时会显示“全部完成”态
-  return importDone.value ? 5 : currentStep.value
+  // Element Plus el-steps: active is 1-based (1..stepCount). Using 0-based would lag by 1.
+  // active 大于最后一个索引时会显示“全部完成”态
+  return importDone.value ? 6 : (currentStep.value + 1)
 })
 
 const handleDbNext = (db) => {
