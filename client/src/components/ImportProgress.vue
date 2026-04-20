@@ -14,10 +14,10 @@
     </div>
 
     <div v-if="status === 'idle' || status === 'importing'" class="progress-container">
-      <div class="progress-circle-wrapper">
+      <div class="progress-circle-wrapper" :class="{ spinning: status === 'importing' }">
         <el-progress
           type="circle"
-          :percentage="progress"
+          :percentage="displayPercent"
           :status="progressStatus"
           :stroke-width="12"
           :width="180"
@@ -126,7 +126,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps({
   params: {
@@ -138,11 +138,17 @@ const props = defineProps({
 const emit = defineEmits(['reset', 'back', 'done'])
 
 const status = ref('idle')
-const progress = ref(0)
 const detailText = ref('')
 const errorMessage = ref('')
 const resultData = ref(null)
-const pulseTimer = ref(null)
+
+const requestId = ref('')
+const heartbeat = ref(null)
+const heartbeatPollTimer = ref(null)
+const elapsedMs = ref(0)
+const elapsedTimer = ref(null)
+const lastHeartbeatAt = ref(0)
+const hasShownStallDialog = ref(false)
 
 const progressStatus = computed(() => {
   if (status.value === 'error') return 'exception'
@@ -150,8 +156,34 @@ const progressStatus = computed(() => {
   return ''
 })
 
+const displayPercent = computed(() => {
+  if (status.value === 'success') return 100
+  if (status.value === 'error') return 100
+  // Honest indicator: fixed progress value + rotation (no fake %)
+  return status.value === 'importing' ? 25 : 0
+})
+
+const formatDuration = (ms) => {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0')
+  const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0')
+  const s = String(totalSeconds % 60).padStart(2, '0')
+  return `${h}:${m}:${s}`
+}
+
+const stageText = computed(() => {
+  const stage = heartbeat.value?.stage
+  const map = {
+    TRUNCATE: '清空数据中',
+    READING: '读取文件中',
+    INSERTING: '写入数据中',
+    COMMITTING: '提交事务中'
+  }
+  return map[stage] || '写入数据库中'
+})
+
 const progressLabel = computed(() => {
-  if (status.value === 'importing') return '写入数据库中'
+  if (status.value === 'importing') return `已运行 ${formatDuration(elapsedMs.value)} · ${stageText.value}`
   if (status.value === 'success') return '已完成'
   if (status.value === 'error') return '已失败'
   return '准备中'
@@ -178,42 +210,91 @@ const conflictStrategyText = computed(() => {
   return map[props.params.conflictStrategy] || props.params.conflictStrategy
 })
 
-const startPulse = () => {
-  stopPulse()
-  // 仅用于“有在工作”的视觉提示，避免误导为真实进度
-  progress.value = 10
-  pulseTimer.value = window.setInterval(() => {
+const startElapsed = () => {
+  stopElapsed()
+  elapsedMs.value = 0
+  elapsedTimer.value = window.setInterval(() => {
     if (status.value !== 'importing') return
-    const next = progress.value + 3
-    progress.value = next >= 90 ? 10 : next
-  }, 300)
+    elapsedMs.value += 1000
+  }, 1000)
 }
 
-const stopPulse = () => {
-  if (pulseTimer.value) {
-    window.clearInterval(pulseTimer.value)
-    pulseTimer.value = null
+const stopElapsed = () => {
+  if (elapsedTimer.value) {
+    window.clearInterval(elapsedTimer.value)
+    elapsedTimer.value = null
   }
+}
+
+const stopHeartbeatPoll = () => {
+  if (heartbeatPollTimer.value) {
+    window.clearInterval(heartbeatPollTimer.value)
+    heartbeatPollTimer.value = null
+  }
+}
+
+const pollHeartbeat = async () => {
+  if (!requestId.value) return
+  try {
+    const res = await axios.get('/api/import/heartbeat', { params: { requestId: requestId.value } })
+    heartbeat.value = res.data
+    lastHeartbeatAt.value = res.data?.updatedAt || Date.now()
+    hasShownStallDialog.value = false
+  } catch (err) {
+    // ignore transient failures; the stall detector will surface if it persists
+  }
+}
+
+const startHeartbeatPoll = () => {
+  stopHeartbeatPoll()
+  lastHeartbeatAt.value = Date.now()
+  heartbeatPollTimer.value = window.setInterval(async () => {
+    if (status.value !== 'importing') return
+    await pollHeartbeat()
+
+    const stalled = Date.now() - (lastHeartbeatAt.value || 0) > 60_000
+    if (stalled && !hasShownStallDialog.value) {
+      hasShownStallDialog.value = true
+      try {
+        await ElMessageBox.confirm(
+          '导入已超过60秒无进展，可能卡住了。你可以继续等待，或返回上一步重试。',
+          '导入可能卡住',
+          { confirmButtonText: '继续等待', cancelButtonText: '返回重试', type: 'warning' }
+        )
+        // continue waiting
+      } catch (e) {
+        // cancel -> back
+        stopHeartbeatPoll()
+        stopElapsed()
+        emit('back')
+      }
+    }
+  }, 5000)
 }
 
 const startImport = async () => {
   // Ensure UI renders "importing" state before the request begins.
   status.value = 'importing'
   detailText.value = '已提交导入请求，正在等待服务器写入完成...'
-  startPulse()
+  requestId.value = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`)
+  heartbeat.value = null
+  hasShownStallDialog.value = false
+  startElapsed()
+  startHeartbeatPoll()
   await nextTick()
 
   try {
-    const res = await axios.post('/api/import', props.params)
+    const res = await axios.post('/api/import', { ...props.params, requestId: requestId.value })
 
     resultData.value = res.data
-    stopPulse()
-    progress.value = 100
+    stopHeartbeatPoll()
+    stopElapsed()
     status.value = 'success'
     detailText.value = ''
     emit('done')
   } catch (err) {
-    stopPulse()
+    stopHeartbeatPoll()
+    stopElapsed()
     status.value = 'error'
     errorMessage.value = err.response?.data?.message || err.message || '未知错误'
     ElMessage.error('导入失败: ' + errorMessage.value)
@@ -233,7 +314,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  stopPulse()
+  stopHeartbeatPoll()
+  stopElapsed()
 })
 </script>
 
@@ -298,6 +380,16 @@ onBeforeUnmount(() => {
 
 .progress-circle-wrapper {
   margin-bottom: 32px;
+}
+
+.progress-circle-wrapper.spinning :deep(svg) {
+  animation: spin 1.2s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .progress-inner {
