@@ -86,6 +86,54 @@ public class ExcelController {
         }
     }
 
+    @PostMapping("/validate-table")
+    public ResponseEntity<ValidateTableResponse> validateTable(@RequestBody ValidateTableRequest request) {
+        try {
+            final int threshold = 90;
+
+            ValidateTableResponse response = new ValidateTableResponse();
+            response.setThreshold(threshold);
+
+            List<String> tableNames = dbService.getAllTableNames(request.getDatabaseId());
+            String canonicalTableName = tableNames.stream()
+                    .filter(name -> name != null && request.getTableName() != null && name.equalsIgnoreCase(request.getTableName()))
+                    .findFirst()
+                    .orElse(null);
+
+            boolean exists = canonicalTableName != null;
+            response.setExists(exists);
+
+            if (!exists) {
+                response.setScore(0);
+                response.setReason(ValidateTableReason.NOT_FOUND);
+                response.setTable(null);
+                return ResponseEntity.ok(response);
+            }
+
+            List<String> excelColumns = request.getColumns();
+            if (excelColumns == null || excelColumns.isEmpty()) {
+                int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
+                PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100, sheetIndex);
+                excelColumns = preview.getColumns();
+            }
+
+            TableInfo tableInfo = dbService.getTableInfo(request.getDatabaseId(), canonicalTableName);
+            TableRecommendation recommendation = tableMatcherService.findBestMatch(
+                    List.of(tableInfo), excelColumns, request.getFilename());
+            int score = recommendation == null ? 0 : recommendation.getScore();
+
+            response.setScore(score);
+            response.setTable(recommendation);
+            if (score < threshold) {
+                response.setReason(ValidateTableReason.BELOW_THRESHOLD);
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
     @PostMapping("/recommend")
     public ResponseEntity<TableRecommendationResponse> getRecommendation(@RequestBody RecommendRequest request) {
         try {
