@@ -2,6 +2,7 @@ package com.exceltodb.controller;
 
 import com.exceltodb.service.DbService;
 import com.exceltodb.service.ExcelParserService;
+import com.exceltodb.service.ImportHeartbeatStore;
 import com.exceltodb.service.ImportService;
 import com.exceltodb.service.TableMatcherService;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,8 @@ class ExcelControllerTableNamesTest {
     TableMatcherService tableMatcherService;
     @MockBean
     ImportService importService;
+    @MockBean
+    ImportHeartbeatStore heartbeatStore;
 
     @Test
     void getTableNames_returnsJsonArray() throws Exception {

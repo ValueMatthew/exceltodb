@@ -3,6 +3,7 @@ package com.exceltodb.controller;
 import com.exceltodb.model.TablePreviewResponse;
 import com.exceltodb.service.DbService;
 import com.exceltodb.service.ExcelParserService;
+import com.exceltodb.service.ImportHeartbeatStore;
 import com.exceltodb.service.ImportService;
 import com.exceltodb.service.TableMatcherService;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,8 @@ class ExcelControllerTablePreviewTest {
     TableMatcherService tableMatcherService;
     @MockBean
     ImportService importService;
+    @MockBean
+    ImportHeartbeatStore heartbeatStore;
 
     @Test
     void tablePreview_returnsColumnsAndRows() throws Exception {

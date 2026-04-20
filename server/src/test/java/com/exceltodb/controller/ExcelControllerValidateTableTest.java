@@ -5,6 +5,7 @@ import com.exceltodb.model.TableInfo;
 import com.exceltodb.model.TableRecommendation;
 import com.exceltodb.service.DbService;
 import com.exceltodb.service.ExcelParserService;
+import com.exceltodb.service.ImportHeartbeatStore;
 import com.exceltodb.service.ImportService;
 import com.exceltodb.service.TableMatcherService;
 import org.hamcrest.Matchers;
@@ -43,6 +44,8 @@ class ExcelControllerValidateTableTest {
     TableMatcherService tableMatcherService;
     @MockBean
     ImportService importService;
+    @MockBean
+    ImportHeartbeatStore heartbeatStore;
 
     @Test
     void validateTable_notFound_returnsExistsFalse() throws Exception {

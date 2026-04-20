@@ -3,6 +3,7 @@ package com.exceltodb.controller;
 import com.exceltodb.model.*;
 import com.exceltodb.service.DbService;
 import com.exceltodb.service.ExcelParserService;
+import com.exceltodb.service.ImportHeartbeatStore;
 import com.exceltodb.service.ImportService;
 import com.exceltodb.service.TableMatcherService;
 import org.springframework.http.ResponseEntity;
@@ -20,13 +21,16 @@ public class ExcelController {
     private final ExcelParserService excelParserService;
     private final TableMatcherService tableMatcherService;
     private final ImportService importService;
+    private final ImportHeartbeatStore heartbeatStore;
 
     public ExcelController(DbService dbService, ExcelParserService excelParserService,
-                           TableMatcherService tableMatcherService, ImportService importService) {
+                           TableMatcherService tableMatcherService, ImportService importService,
+                           ImportHeartbeatStore heartbeatStore) {
         this.dbService = dbService;
         this.excelParserService = excelParserService;
         this.tableMatcherService = tableMatcherService;
         this.importService = importService;
+        this.heartbeatStore = heartbeatStore;
     }
 
     @GetMapping("/databases")
@@ -96,6 +100,19 @@ public class ExcelController {
         }
         try {
             return ResponseEntity.ok(dbService.getTablePreview(databaseId, tableName, limit));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    @GetMapping("/import/heartbeat")
+    public ResponseEntity<ImportHeartbeat> getImportHeartbeat(@RequestParam String requestId) {
+        try {
+            ImportHeartbeat hb = heartbeatStore.get(requestId);
+            if (hb == null) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(hb);
         } catch (Exception e) {
             return ResponseEntity.status(500).build();
         }
