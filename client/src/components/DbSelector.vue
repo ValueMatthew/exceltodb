@@ -127,7 +127,9 @@ const loadDatabases = async () => {
   }
 }
 
-const testConnection = async (dbId = selectedDbId.value) => {
+const testConnection = async (arg) => {
+  // Vue @click="testConnection" passes the native event as the first argument; only watch() passes a string id.
+  const dbId = typeof arg === 'string' && arg ? arg : selectedDbId.value
   if (!dbId) return
   const seq = ++testSeq
   testing.value = true
