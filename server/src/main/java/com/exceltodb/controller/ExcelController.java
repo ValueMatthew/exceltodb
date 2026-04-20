@@ -91,6 +91,9 @@ public class ExcelController {
     public ResponseEntity<TablePreviewResponse> getTablePreview(@RequestParam String databaseId,
                                                                 @RequestParam String tableName,
                                                                 @RequestParam(defaultValue = "5") int limit) {
+        if (isBlank(databaseId) || isBlank(tableName)) {
+            return ResponseEntity.status(500).build();
+        }
         try {
             return ResponseEntity.ok(dbService.getTablePreview(databaseId, tableName, limit));
         } catch (Exception e) {

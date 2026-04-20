@@ -57,4 +57,15 @@ class ExcelControllerTablePreviewTest {
                 .andExpect(jsonPath("$.rows[0].id").value(1))
                 .andExpect(jsonPath("$.rows[0].name").value("a"));
     }
+
+    @Test
+    void tablePreview_dbFailure_returns500() throws Exception {
+        Mockito.when(dbService.getTablePreview("prod_erp", "orders", 5))
+                .thenThrow(new RuntimeException("db error"));
+
+        mvc.perform(get("/api/table-preview")
+                        .param("databaseId", "prod_erp")
+                        .param("tableName", "orders"))
+                .andExpect(status().isInternalServerError());
+    }
 }
