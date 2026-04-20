@@ -16,6 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -67,5 +71,25 @@ class ExcelControllerTablePreviewTest {
                         .param("databaseId", "prod_erp")
                         .param("tableName", "orders"))
                 .andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void tablePreview_blankDatabaseId_returns500AndDoesNotCallDb() throws Exception {
+        mvc.perform(get("/api/table-preview")
+                        .param("databaseId", " ")
+                        .param("tableName", "orders"))
+                .andExpect(status().isInternalServerError());
+
+        verify(dbService, never()).getTablePreview(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void tablePreview_blankTableName_returns500AndDoesNotCallDb() throws Exception {
+        mvc.perform(get("/api/table-preview")
+                        .param("databaseId", "prod_erp")
+                        .param("tableName", " "))
+                .andExpect(status().isInternalServerError());
+
+        verify(dbService, never()).getTablePreview(anyString(), anyString(), anyInt());
     }
 }
