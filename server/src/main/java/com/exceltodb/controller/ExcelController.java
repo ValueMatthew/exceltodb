@@ -87,6 +87,20 @@ public class ExcelController {
         }
     }
 
+    @GetMapping("/table-preview")
+    public ResponseEntity<TablePreviewResponse> getTablePreview(@RequestParam String databaseId,
+                                                                @RequestParam String tableName,
+                                                                @RequestParam(defaultValue = "5") int limit) {
+        if (isBlank(databaseId) || isBlank(tableName)) {
+            return ResponseEntity.status(500).build();
+        }
+        try {
+            return ResponseEntity.ok(dbService.getTablePreview(databaseId, tableName, limit));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
     @PostMapping("/validate-table")
     public ResponseEntity<ValidateTableResponse> validateTable(@RequestBody ValidateTableRequest request) {
         try {
