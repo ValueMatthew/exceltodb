@@ -3,12 +3,15 @@ package com.exceltodb.service;
 import com.exceltodb.config.AppConfig;
 import com.exceltodb.config.DataSourceConfig;
 import com.exceltodb.model.DatabaseInfo;
+import com.exceltodb.model.TablePreviewResponse;
 import com.exceltodb.model.TableInfo;
 import org.springframework.stereotype.Service;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class DbService {
@@ -114,6 +117,45 @@ public class DbService {
             throw new RuntimeException("获取表名列表失败: " + e.getMessage(), e);
         }
         return names;
+    }
+
+    public TablePreviewResponse getTablePreview(String databaseId, String tableName, int limit) {
+        int cappedLimit = Math.min(5, Math.max(1, limit));
+        TablePreviewResponse response = new TablePreviewResponse();
+        response.setTableName(tableName);
+
+        try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection();
+             Statement stmt = conn.createStatement()) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
+
+            List<String> columns = new ArrayList<>();
+            try (ResultSet colRs = metaData.getColumns(catalog, null, tableName, null)) {
+                while (colRs.next()) {
+                    columns.add(colRs.getString("COLUMN_NAME"));
+                }
+            }
+            response.setColumns(columns);
+
+            String escapedTableName = tableName.replace("`", "``");
+            String sql = "SELECT * FROM `" + escapedTableName + "` LIMIT " + cappedLimit;
+            List<Map<String, Object>> rows = new ArrayList<>();
+            try (ResultSet rs = stmt.executeQuery(sql)) {
+                ResultSetMetaData resultSetMetaData = rs.getMetaData();
+                int columnCount = resultSetMetaData.getColumnCount();
+                while (rs.next()) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    for (int i = 1; i <= columnCount; i++) {
+                        row.put(resultSetMetaData.getColumnLabel(i), rs.getObject(i));
+                    }
+                    rows.add(row);
+                }
+            }
+            response.setRows(rows);
+            return response;
+        } catch (SQLException e) {
+            throw new RuntimeException("预览目标表失败: " + e.getMessage(), e);
+        }
     }
 
     private String getPrimaryKey(DatabaseMetaData metaData, String catalog, String tableName) throws SQLException {
