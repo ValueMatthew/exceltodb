@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api")
@@ -94,6 +95,10 @@ public class ExcelController {
             ValidateTableResponse response = new ValidateTableResponse();
             response.setThreshold(threshold);
 
+            if (isBlank(request.getDatabaseId())) {
+                return ResponseEntity.status(500).build();
+            }
+
             List<String> tableNames = dbService.getAllTableNames(request.getDatabaseId());
             String canonicalTableName = tableNames.stream()
                     .filter(name -> name != null && request.getTableName() != null && name.equalsIgnoreCase(request.getTableName()))
@@ -110,11 +115,14 @@ public class ExcelController {
                 return ResponseEntity.ok(response);
             }
 
-            List<String> excelColumns = request.getColumns();
-            if (excelColumns == null || excelColumns.isEmpty()) {
+            List<String> excelColumns = sanitizeColumns(request.getColumns());
+            if (excelColumns.isEmpty()) {
+                if (isBlank(request.getFilename())) {
+                    return ResponseEntity.status(500).build();
+                }
                 int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
                 PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100, sheetIndex);
-                excelColumns = preview.getColumns();
+                excelColumns = sanitizeColumns(preview.getColumns());
             }
 
             TableInfo tableInfo = dbService.getTableInfo(request.getDatabaseId(), canonicalTableName);
@@ -132,6 +140,21 @@ public class ExcelController {
         } catch (Exception e) {
             return ResponseEntity.status(500).build();
         }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static List<String> sanitizeColumns(List<String> columns) {
+        if (columns == null) {
+            return List.of();
+        }
+        return columns.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(column -> !column.isEmpty())
+                .toList();
     }
 
     @PostMapping("/recommend")

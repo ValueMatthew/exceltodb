@@ -1,5 +1,6 @@
 package com.exceltodb.controller;
 
+import com.exceltodb.model.PreviewResult;
 import com.exceltodb.model.TableInfo;
 import com.exceltodb.model.TableRecommendation;
 import com.exceltodb.service.DbService;
@@ -18,6 +19,12 @@ import org.springframework.test.web.servlet.ResultMatcher;
 
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -120,6 +127,122 @@ class ExcelControllerValidateTableTest {
                 .andExpect(jsonPath("$.score").value(95))
                 .andExpect(reasonIsNullOrMissing())
                 .andExpect(jsonPath("$.table.tableName").value("orders"));
+    }
+
+    @Test
+    void validateTable_columnsWithNullEntries_areSanitizedBeforeMatching() throws Exception {
+        TableInfo info = tableInfo("orders", List.of("id", "order_no"), "id");
+
+        Mockito.when(dbService.getAllTableNames("prod_erp")).thenReturn(List.of("orders"));
+        Mockito.when(dbService.getTableInfo("prod_erp", "orders")).thenReturn(info);
+        Mockito.when(tableMatcherService.findBestMatch(anyList(), anyList(), eq("orders.xlsx")))
+                .thenReturn(recommendation("orders", 50, info.getColumns(), List.of("id"), "id"));
+
+        String body = """
+                {
+                  "databaseId": "prod_erp",
+                  "tableName": "orders",
+                  "filename": "orders.xlsx",
+                  "sheetIndex": 0,
+                  "columns": [null, "  id  ", "", "   "]
+                }
+                """;
+
+        mvc.perform(post("/api/validate-table")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.reason").value("BELOW_THRESHOLD"))
+                .andExpect(jsonPath("$.score").value(50))
+                .andExpect(jsonPath("$.table.tableName").value("orders"));
+
+        verify(tableMatcherService).findBestMatch(
+                anyList(),
+                argThat(columns -> columns.equals(List.of("id"))),
+                eq("orders.xlsx"));
+        verify(excelParserService, never()).getPreview(Mockito.anyString(), anyInt(), anyInt());
+    }
+
+    @Test
+    void validateTable_blankColumns_afterSanitize_fallsBackToPreview() throws Exception {
+        TableInfo info = tableInfo("orders", List.of("id", "order_no"), "id");
+        PreviewResult preview = new PreviewResult();
+        preview.setColumns(List.of("id"));
+
+        Mockito.when(dbService.getAllTableNames("prod_erp")).thenReturn(List.of("orders"));
+        Mockito.when(dbService.getTableInfo("prod_erp", "orders")).thenReturn(info);
+        Mockito.when(excelParserService.getPreview("orders.xlsx", 100, 2)).thenReturn(preview);
+        Mockito.when(tableMatcherService.findBestMatch(anyList(), anyList(), eq("orders.xlsx")))
+                .thenReturn(recommendation("orders", 95, info.getColumns(), List.of("id"), "id"));
+
+        String body = """
+                {
+                  "databaseId": "prod_erp",
+                  "tableName": "orders",
+                  "filename": "orders.xlsx",
+                  "sheetIndex": 2,
+                  "columns": [null, "   "]
+                }
+                """;
+
+        mvc.perform(post("/api/validate-table")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exists").value(true))
+                .andExpect(jsonPath("$.score").value(95))
+                .andExpect(reasonIsNullOrMissing())
+                .andExpect(jsonPath("$.table.tableName").value("orders"));
+
+        verify(excelParserService).getPreview("orders.xlsx", 100, 2);
+        verify(tableMatcherService).findBestMatch(
+                anyList(),
+                argThat(columns -> columns.equals(List.of("id"))),
+                eq("orders.xlsx"));
+    }
+
+    @Test
+    void validateTable_blankDatabaseId_returns500WithoutDbLookup() throws Exception {
+        String body = """
+                {
+                  "databaseId": "   ",
+                  "tableName": "orders",
+                  "filename": "orders.xlsx",
+                  "sheetIndex": 0,
+                  "columns": ["id"]
+                }
+                """;
+
+        mvc.perform(post("/api/validate-table")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isInternalServerError());
+
+        verify(dbService, never()).getAllTableNames(Mockito.anyString());
+    }
+
+    @Test
+    void validateTable_blankFilenameWhenPreviewRequired_returns500WithoutPreviewLookup() throws Exception {
+        Mockito.when(dbService.getAllTableNames("prod_erp")).thenReturn(List.of("orders"));
+
+        String body = """
+                {
+                  "databaseId": "prod_erp",
+                  "tableName": "orders",
+                  "filename": "   ",
+                  "sheetIndex": 0,
+                  "columns": [null, "   "]
+                }
+                """;
+
+        mvc.perform(post("/api/validate-table")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isInternalServerError());
+
+        verify(excelParserService, never()).getPreview(Mockito.anyString(), anyInt(), anyInt());
+        verify(tableMatcherService, never()).findBestMatch(anyList(), anyList(), Mockito.anyString());
     }
 
     private static TableInfo tableInfo(String name, List<String> columns, String primaryKey) {
