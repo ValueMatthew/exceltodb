@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api")
@@ -75,6 +76,85 @@ public class ExcelController {
         } catch (Exception e) {
             return ResponseEntity.status(500).build();
         }
+    }
+
+    @GetMapping("/tables/{databaseId}/names")
+    public ResponseEntity<List<String>> getTableNames(@PathVariable String databaseId) {
+        try {
+            return ResponseEntity.ok(dbService.getAllTableNames(databaseId));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    @PostMapping("/validate-table")
+    public ResponseEntity<ValidateTableResponse> validateTable(@RequestBody ValidateTableRequest request) {
+        try {
+            final int threshold = 90;
+
+            ValidateTableResponse response = new ValidateTableResponse();
+            response.setThreshold(threshold);
+
+            if (isBlank(request.getDatabaseId())) {
+                return ResponseEntity.status(500).build();
+            }
+
+            List<String> tableNames = dbService.getAllTableNames(request.getDatabaseId());
+            String canonicalTableName = tableNames.stream()
+                    .filter(name -> name != null && request.getTableName() != null && name.equalsIgnoreCase(request.getTableName()))
+                    .findFirst()
+                    .orElse(null);
+
+            boolean exists = canonicalTableName != null;
+            response.setExists(exists);
+
+            if (!exists) {
+                response.setScore(0);
+                response.setReason(ValidateTableReason.NOT_FOUND);
+                response.setTable(null);
+                return ResponseEntity.ok(response);
+            }
+
+            List<String> excelColumns = sanitizeColumns(request.getColumns());
+            if (excelColumns.isEmpty()) {
+                if (isBlank(request.getFilename())) {
+                    return ResponseEntity.status(500).build();
+                }
+                int sheetIndex = request.getSheetIndex() != null ? request.getSheetIndex() : 0;
+                PreviewResult preview = excelParserService.getPreview(request.getFilename(), 100, sheetIndex);
+                excelColumns = sanitizeColumns(preview.getColumns());
+            }
+
+            TableInfo tableInfo = dbService.getTableInfo(request.getDatabaseId(), canonicalTableName);
+            TableRecommendation recommendation = tableMatcherService.findBestMatch(
+                    List.of(tableInfo), excelColumns, request.getFilename());
+            int score = recommendation == null ? 0 : recommendation.getScore();
+
+            response.setScore(score);
+            response.setTable(recommendation);
+            if (score < threshold) {
+                response.setReason(ValidateTableReason.BELOW_THRESHOLD);
+            }
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static List<String> sanitizeColumns(List<String> columns) {
+        if (columns == null) {
+            return List.of();
+        }
+        return columns.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(column -> !column.isEmpty())
+                .toList();
     }
 
     @PostMapping("/recommend")

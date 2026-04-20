@@ -6,72 +6,132 @@
       </div>
       <div>
         <h2>选择目标表</h2>
-        <p class="subtitle">系统根据 Excel 列名智能推荐匹配度 ≥ 90% 的数据表</p>
+        <p class="subtitle">支持手动指定目标表，也支持系统智能推荐</p>
       </div>
     </div>
 
-    <div v-if="loading" class="loading-state">
-      <el-icon class="is-loading"><loading /></el-icon>
-      <span>正在分析数据表匹配度...</span>
+    <div class="mode-switch">
+      <el-radio-group v-model="mode" size="large">
+        <el-radio-button :label="MODE_MANUAL">手动指定目标表</el-radio-button>
+        <el-radio-button :label="MODE_RECOMMEND">系统推荐表</el-radio-button>
+      </el-radio-group>
     </div>
 
-    <div v-else class="recommend-content">
-      <transition name="el-fade-in">
-        <div v-if="recommendations.length > 0" class="recommendation-list">
-          <el-card shadow="hover" class="rec-card" :body-style="{ padding: '0px' }">
-            <div class="rec-header">
-              <div class="rec-badge">
-                <span>⭐ 推荐列表</span>
-              </div>
-              <el-tag type="success" class="score-tag">最高 {{ topScore }}%</el-tag>
-            </div>
-
-            <div class="rec-body">
-              <el-radio-group v-model="selectedTableName" class="rec-radio-group">
-                <div
-                  v-for="(rec, idx) in recommendations"
-                  :key="rec.tableName"
-                  class="rec-item"
+    <div class="recommend-content">
+      <transition name="el-fade-in" mode="out-in">
+        <div v-if="mode === MODE_MANUAL" key="manual" class="manual-mode">
+          <el-card shadow="hover" class="manual-card">
+            <el-form label-position="top" class="manual-form">
+              <el-form-item label="目标表名称">
+                <el-select
+                  v-model="manualTableName"
+                  filterable
+                  allow-create
+                  clearable
+                  placeholder="请选择或输入目标表名称"
+                  class="manual-select"
+                  :loading="manualLoadingNames"
                 >
-                  <el-radio :label="rec.tableName">
-                    <span class="rec-item-title">
-                      <span class="rec-rank">{{ idx + 1 }}</span>
-                      <span class="rec-name">📋 {{ rec.tableName }}</span>
-                    </span>
-                  </el-radio>
-                  <div class="rec-item-meta">
-                    <el-tag type="success" size="small" effect="plain">{{ rec.score }}% 匹配</el-tag>
-                    <el-tag v-if="isBackupLike(rec.tableName)" type="warning" size="small" effect="plain">
-                      可能是备份表
-                    </el-tag>
-                    <span class="meta-text">列数 {{ rec.columnCount }}</span>
-                    <span class="meta-text">主键 {{ rec.primaryKey || '-' }}</span>
-                    <span class="meta-text">匹配列 {{ rec.matchedColumns?.length || 0 }}</span>
-                  </div>
-                </div>
-              </el-radio-group>
-            </div>
+                  <el-option
+                    v-for="tableName in manualOptions"
+                    :key="tableName"
+                    :label="tableName"
+                    :value="tableName"
+                  />
+                </el-select>
+              </el-form-item>
 
-            <div class="rec-footer">
-              <el-button type="primary" @click="selectChosenTable" class="select-btn">
-                选择此表
-              </el-button>
-            </div>
+              <el-form-item class="manual-actions">
+                <el-button
+                  type="primary"
+                  size="large"
+                  :loading="manualValidating"
+                  :disabled="manualLoadingNames"
+                  @click="validateManualTable"
+                >
+                  确认/校验
+                </el-button>
+              </el-form-item>
+            </el-form>
+
+            <el-alert
+              v-if="manualValidationResult"
+              :type="manualAlertType"
+              :title="manualAlertTitle"
+              :description="manualAlertDescription"
+              :closable="false"
+              show-icon
+              class="manual-result"
+            />
           </el-card>
         </div>
-      </transition>
 
-      <transition name="el-fade-in">
-        <div v-if="recommendations.length === 0 && !loading" class="no-match">
-          <el-alert
-            type="warning"
-            :closable="false"
-            show-icon
-            class="no-match-alert"
-            :title="'未找到合适的匹配表 (最高匹配度 ' + topScore + '% < 90%)'"
-          >
-            请检查导入文件是否正确，或联系IT团队创建对应的数据表后再试
-          </el-alert>
+        <div v-else key="recommend" class="recommend-mode">
+          <div v-if="loading" class="loading-state">
+            <el-icon class="is-loading"><loading /></el-icon>
+            <span>正在分析数据表匹配度...</span>
+          </div>
+
+          <template v-else>
+            <transition name="el-fade-in">
+              <div v-if="recommendations.length > 0" class="recommendation-list">
+                <el-card shadow="hover" class="rec-card" :body-style="{ padding: '0px' }">
+                  <div class="rec-header">
+                    <div class="rec-badge">
+                      <span>⭐ 推荐列表</span>
+                    </div>
+                    <el-tag type="success" class="score-tag">最高 {{ topScore }}%</el-tag>
+                  </div>
+
+                  <div class="rec-body">
+                    <el-radio-group v-model="selectedTableName" class="rec-radio-group">
+                      <div
+                        v-for="(rec, idx) in recommendations"
+                        :key="rec.tableName"
+                        class="rec-item"
+                      >
+                        <el-radio :label="rec.tableName">
+                          <span class="rec-item-title">
+                            <span class="rec-rank">{{ idx + 1 }}</span>
+                            <span class="rec-name">📋 {{ rec.tableName }}</span>
+                          </span>
+                        </el-radio>
+                        <div class="rec-item-meta">
+                          <el-tag type="success" size="small" effect="plain">{{ rec.score }}% 匹配</el-tag>
+                          <el-tag v-if="isBackupLike(rec.tableName)" type="warning" size="small" effect="plain">
+                            可能是备份表
+                          </el-tag>
+                          <span class="meta-text">列数 {{ rec.columnCount }}</span>
+                          <span class="meta-text">主键 {{ rec.primaryKey || '-' }}</span>
+                          <span class="meta-text">匹配列 {{ rec.matchedColumns?.length || 0 }}</span>
+                        </div>
+                      </div>
+                    </el-radio-group>
+                  </div>
+
+                  <div class="rec-footer">
+                    <el-button type="primary" @click="selectChosenTable" class="select-btn">
+                      选择此表
+                    </el-button>
+                  </div>
+                </el-card>
+              </div>
+            </transition>
+
+            <transition name="el-fade-in">
+              <div v-if="recommendLoaded && recommendations.length === 0" class="no-match">
+                <el-alert
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  class="no-match-alert"
+                  :title="`未找到合适的匹配表 (最高匹配度 ${topScore}% < ${recommendThreshold}%)`"
+                >
+                  请检查导入文件是否正确，或联系IT团队创建对应的数据表后再试
+                </el-alert>
+              </div>
+            </transition>
+          </template>
         </div>
       </transition>
 
@@ -134,9 +194,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+
+const MODE_MANUAL = 'MANUAL'
+const MODE_RECOMMEND = 'RECOMMEND'
 
 const emit = defineEmits(['next', 'back'])
 const selectedDb = inject('selectedDb')
@@ -144,23 +207,126 @@ const uploadedFile = inject('uploadedFile')
 const previewData = inject('previewData')
 const selectedTable = inject('selectedTable')
 
+const mode = ref(MODE_MANUAL)
+
+const manualTableName = ref('')
+const manualOptions = ref([])
+const manualLoadingNames = ref(false)
+const manualValidating = ref(false)
+const manualValidationResult = ref(null)
+const manualError = ref('')
+const manualSelectedTableInfo = ref(null)
+
 const loading = ref(false)
 const recommendations = ref([])
 const topScore = ref(0)
-const selectedTableInfo = ref(null)
+const recommendThreshold = ref(90)
 const selectedTableName = ref('')
+const recommendLoaded = ref(false)
+const recommendSelectedTableInfo = ref(null)
+
+const selectedTableInfo = ref(null)
 const importMode = ref('INCREMENTAL')
 const conflictStrategy = ref('ERROR')
 
 const backupKeywords = ['test', 'bak', 'back', 'full']
+
 const isBackupLike = (tableName) => {
   if (!tableName) return false
   const lower = String(tableName).toLowerCase()
   return backupKeywords.some(k => lower.includes(k))
 }
 
+const normalizeSelectedTableInfo = (table) => {
+  if (!table) return null
+
+  return {
+    name: table.tableName || table.name,
+    primaryKey: table.primaryKey,
+    columns: table.columns || []
+  }
+}
+
+const syncActiveSelectedTableInfo = () => {
+  const activeTable = mode.value === MODE_MANUAL
+    ? manualSelectedTableInfo.value
+    : recommendSelectedTableInfo.value
+
+  selectedTableInfo.value = activeTable ? { ...activeTable } : null
+  selectedTable.value = activeTable ? { ...activeTable } : null
+}
+
+const setSelectedTableForMode = (table, targetMode = mode.value) => {
+  const normalized = normalizeSelectedTableInfo(table)
+  if (targetMode === MODE_MANUAL) {
+    manualSelectedTableInfo.value = normalized
+  } else {
+    recommendSelectedTableInfo.value = normalized
+  }
+  syncActiveSelectedTableInfo()
+}
+
+const clearSelectedTableForMode = (targetMode = mode.value) => {
+  if (targetMode === MODE_MANUAL) {
+    manualSelectedTableInfo.value = null
+  } else {
+    recommendSelectedTableInfo.value = null
+  }
+  syncActiveSelectedTableInfo()
+}
+
+const manualAlertType = computed(() => {
+  if (!manualValidationResult.value) return 'info'
+  if (!manualValidationResult.value.exists) return 'error'
+  if ((manualValidationResult.value.score ?? 0) < (manualValidationResult.value.threshold ?? 90)) {
+    return 'warning'
+  }
+  if (manualError.value) return 'error'
+  return 'success'
+})
+
+const manualAlertTitle = computed(() => {
+  if (!manualValidationResult.value) return ''
+  if (!manualValidationResult.value.exists) return '目标表不存在'
+
+  const score = manualValidationResult.value.score ?? 0
+  const threshold = manualValidationResult.value.threshold ?? 90
+  if (score < threshold) {
+    return '目标表存在，但匹配度未达标'
+  }
+
+  if (manualError.value) return '目标表校验失败'
+
+  return '目标表校验通过'
+})
+
+const manualAlertDescription = computed(() => {
+  if (!manualValidationResult.value) return ''
+  if (manualError.value) return manualError.value
+
+  const score = manualValidationResult.value.score ?? 0
+  const threshold = manualValidationResult.value.threshold ?? 90
+  return `匹配度 ${score}%，阈值 ${threshold}%`
+})
+
+const loadManualTableNames = async () => {
+  if (!selectedDb.value?.id || manualLoadingNames.value || manualOptions.value.length > 0) return
+
+  manualLoadingNames.value = true
+  manualError.value = ''
+  try {
+    const response = await axios.get(`/api/tables/${selectedDb.value.id}/names`)
+    manualOptions.value = Array.isArray(response.data) ? response.data : []
+  } catch (err) {
+    manualError.value = '加载目标表名称失败，请稍后重试'
+    ElMessage.error(manualError.value)
+  } finally {
+    manualLoadingNames.value = false
+  }
+}
+
 const loadRecommendation = async () => {
-  if (!selectedDb.value?.id) return
+  if (!selectedDb.value?.id || loading.value) return
 
   loading.value = true
   try {
@@ -174,26 +340,72 @@ const loadRecommendation = async () => {
     if (recommendRes.data) {
       recommendations.value = recommendRes.data.recommendations || []
       topScore.value = recommendRes.data.topScore || 0
-      if (recommendations.value.length > 0) {
+      recommendThreshold.value = recommendRes.data.threshold || 90
+      recommendLoaded.value = true
+
+      if (!selectedTableName.value && recommendations.value.length > 0) {
         selectedTableName.value = recommendations.value[0].tableName
-      } else {
-        selectedTableName.value = ''
       }
     }
   } catch (err) {
-    ElMessage.error('加载表信息失败')
+    ElMessage.error('加载表推荐失败')
   } finally {
     loading.value = false
   }
 }
 
-const selectTable = (table) => {
-  selectedTableInfo.value = {
-    name: table.tableName || table.name,
-    primaryKey: table.primaryKey,
-    columns: table.columns
+const validateManualTable = async () => {
+  if (!manualTableName.value?.trim()) {
+    ElMessage.warning('请选择目标表')
+    return
   }
-  selectedTable.value = selectedTableInfo.value
+
+  manualValidating.value = true
+  manualError.value = ''
+  manualValidationResult.value = null
+
+  try {
+    const response = await axios.post('/api/validate-table', {
+      databaseId: selectedDb.value?.id,
+      tableName: manualTableName.value.trim(),
+      filename: uploadedFile.value?.filename,
+      sheetIndex: uploadedFile.value?.sheetIndex ?? 0,
+      columns: previewData.value?.columns || []
+    })
+
+    manualValidationResult.value = response.data
+
+    if (!response.data?.exists) {
+      manualError.value = '未找到该目标表，请检查表名后重试'
+      clearSelectedTableForMode(MODE_MANUAL)
+      ElMessage.warning(manualError.value)
+      return
+    }
+
+    if ((response.data.score ?? 0) < (response.data.threshold ?? 90)) {
+      manualError.value = `目标表存在，但匹配度 ${response.data.score}% 低于阈值 ${response.data.threshold}%`
+      clearSelectedTableForMode(MODE_MANUAL)
+      ElMessage.warning(manualError.value)
+      return
+    }
+
+    if (!response.data.table) {
+      manualError.value = '服务器未返回表结构信息，请稍后重试'
+      clearSelectedTableForMode(MODE_MANUAL)
+      ElMessage.error(manualError.value)
+      return
+    }
+
+    manualTableName.value = response.data.table.tableName || manualTableName.value.trim()
+    setSelectedTableForMode(response.data.table, MODE_MANUAL)
+    ElMessage.success(`校验通过，匹配度 ${response.data.score}%`)
+  } catch (err) {
+    manualError.value = '目标表校验失败，请稍后重试'
+    clearSelectedTableForMode(MODE_MANUAL)
+    ElMessage.error(manualError.value)
+  } finally {
+    manualValidating.value = false
+  }
 }
 
 const selectChosenTable = () => {
@@ -202,7 +414,7 @@ const selectChosenTable = () => {
     ElMessage.warning('请选择一个目标表')
     return
   }
-  selectTable(chosen)
+  setSelectedTableForMode(chosen, MODE_RECOMMEND)
 }
 
 const confirmImport = () => {
@@ -214,8 +426,19 @@ const confirmImport = () => {
   emit('next', selectedTable.value)
 }
 
+watch(mode, (nextMode) => {
+  if (nextMode === MODE_MANUAL) {
+    void loadManualTableNames()
+  } else if (!recommendLoaded.value) {
+    void loadRecommendation()
+  }
+
+  syncActiveSelectedTableInfo()
+})
+
 onMounted(() => {
-  loadRecommendation()
+  void loadManualTableNames()
+  syncActiveSelectedTableInfo()
 })
 </script>
 
@@ -223,6 +446,78 @@ onMounted(() => {
 .table-recommend {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.recommend-icon-bg {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  box-shadow: 0 4px 15px rgba(250, 112, 154, 0.4);
+}
+
+.section-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 22px;
+  color: #303133;
+}
+
+.subtitle {
+  color: #909399;
+  font-size: 14px;
+  margin: 0;
+}
+
+.mode-switch {
+  margin-bottom: 24px;
+}
+
+.manual-card,
+.rec-card {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.manual-form {
+  margin-bottom: 8px;
+}
+
+.manual-select {
+  width: 100%;
+}
+
+.manual-actions :deep(.el-form-item__content) {
+  justify-content: flex-end;
+}
+
+.manual-result {
+  margin-top: 8px;
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #667eea;
+  padding: 60px 20px;
+  font-size: 16px;
 }
 
 .recommendation-list {
@@ -283,60 +578,8 @@ onMounted(() => {
   opacity: 0.9;
 }
 
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 32px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.section-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-}
-
-.recommend-icon-bg {
-  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-  box-shadow: 0 4px 15px rgba(250, 112, 154, 0.4);
-}
-
-.section-header h2 {
-  margin: 0 0 4px 0;
-  font-size: 22px;
-  color: #303133;
-}
-
-.subtitle {
-  color: #909399;
-  font-size: 14px;
-  margin: 0;
-}
-
-.loading-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #667eea;
-  padding: 60px 20px;
-  font-size: 16px;
-}
-
-.recommendation-card {
-  margin-bottom: 24px;
-}
-
 .rec-card {
   border: 2px solid #67c23a;
-  border-radius: 16px;
-  overflow: hidden;
 }
 
 .rec-header {
@@ -363,56 +606,6 @@ onMounted(() => {
 
 .rec-body {
   padding: 20px;
-}
-
-.rec-table-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 16px;
-}
-
-.rec-stats {
-  display: flex;
-  gap: 24px;
-  margin-bottom: 16px;
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px 20px;
-  background: #f5f7fa;
-  border-radius: 8px;
-}
-
-.stat-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-.matched-columns {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.match-label {
-  font-size: 13px;
-  color: #606266;
-}
-
-.match-tag {
-  margin: 2px;
 }
 
 .rec-footer {

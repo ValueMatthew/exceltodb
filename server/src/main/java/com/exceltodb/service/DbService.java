@@ -99,6 +99,23 @@ public class DbService {
         return tables;
     }
 
+    public List<String> getAllTableNames(String databaseId) {
+        List<String> names = new ArrayList<>();
+        try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
+            String[] types = {"TABLE"};
+            try (ResultSet rs = metaData.getTables(catalog, null, "%", types)) {
+                while (rs.next()) {
+                    names.add(rs.getString("TABLE_NAME"));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("获取表名列表失败: " + e.getMessage(), e);
+        }
+        return names;
+    }
+
     private String getPrimaryKey(DatabaseMetaData metaData, String catalog, String tableName) throws SQLException {
         try (ResultSet rs = metaData.getPrimaryKeys(catalog, null, tableName)) {
             if (rs.next()) {
@@ -124,10 +141,34 @@ public class DbService {
                 }
             }
 
+            List<String> excludedColumns = new ArrayList<>();
+            String schemaName = conn.getCatalog();
+            String excludedColsSql = "SELECT COLUMN_NAME, COLUMN_DEFAULT, LOWER(EXTRA) as EXTRA_LOWER FROM INFORMATION_SCHEMA.COLUMNS " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+                    "AND (COLUMN_DEFAULT IS NOT NULL AND COLUMN_DEFAULT != '' " +
+                    "     OR LOWER(EXTRA) LIKE '%on update%')";
+            try (PreparedStatement pstmt = conn.prepareStatement(excludedColsSql)) {
+                pstmt.setString(1, schemaName);
+                pstmt.setString(2, tableName);
+                try (ResultSet exRs = pstmt.executeQuery()) {
+                    while (exRs.next()) {
+                        String colName = exRs.getString("COLUMN_NAME");
+                        String defaultVal = exRs.getString("COLUMN_DEFAULT");
+                        String extraLower = exRs.getString("EXTRA_LOWER");
+                        boolean hasDefault = defaultVal != null && !defaultVal.trim().isEmpty();
+                        boolean hasOnUpdate = extraLower != null && extraLower.contains("on update");
+                        if ((hasDefault || hasOnUpdate) && !excludedColumns.contains(colName)) {
+                            excludedColumns.add(colName);
+                        }
+                    }
+                }
+            }
+
             tableInfo.setName(tableName);
             tableInfo.setColumnCount(columns.size());
             tableInfo.setColumns(columns);
             tableInfo.setPrimaryKey(primaryKey);
+            tableInfo.setExcludedColumns(excludedColumns);
 
         } catch (SQLException e) {
             throw new RuntimeException("获取表信息失败: " + e.getMessage(), e);
