@@ -23,6 +23,7 @@ public class AppConfig {
     private String configFile;
     private String uploadTempPath = "./uploads";
     private int batchSize = 5000;
+    private boolean bulkLoadEnabled = true;
 
     private List<DatabaseInfo> databases;
 
@@ -61,6 +62,10 @@ public class AppConfig {
             Map<String, Object> importConfig = (Map<String, Object>) config.get("import");
             if (importConfig != null) {
                 batchSize = (Integer) importConfig.getOrDefault("batchSize", batchSize);
+                Object bulkLoadEnabledValue = importConfig.get("bulkLoadEnabled");
+                if (bulkLoadEnabledValue != null) {
+                    bulkLoadEnabled = parseBoolean(bulkLoadEnabledValue, bulkLoadEnabled);
+                }
             }
 
             // Always resolve upload dir to an absolute, normalized path to avoid Tomcat-relative issues.
@@ -72,6 +77,12 @@ public class AppConfig {
         } catch (FileNotFoundException e) {
             throw new RuntimeException("配置文件不存在: " + configFile, e);
         }
+    }
+
+    private static boolean parseBoolean(Object value, boolean defaultValue) {
+        if (value == null) return defaultValue;
+        if (value instanceof Boolean b) return b;
+        return Boolean.parseBoolean(String.valueOf(value).trim());
     }
 
     private DatabaseInfo mapToDatabaseInfo(Map<String, Object> map) {
