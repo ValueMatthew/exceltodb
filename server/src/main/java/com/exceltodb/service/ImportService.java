@@ -56,13 +56,6 @@ public class ImportService {
             try {
                 return bulkLoadImportService.importWithLoadData(ds, request);
             } catch (Exception e) {
-                if (requestId != null && !requestId.isBlank()) {
-                    try {
-                        heartbeatStore.error(requestId, 0, e.getMessage());
-                    } catch (Exception ignored) {
-                        // Best-effort only: do not let heartbeat failure mask import failure.
-                    }
-                }
                 result.setSuccess(false);
                 result.setMessage("导入失败: " + e.getMessage());
                 return result;
