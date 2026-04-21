@@ -49,6 +49,7 @@ public class ImportService {
             heartbeatStore.start(requestId);
         }
         long lastProcessedRows = 0;
+        long lastHeartbeatMs = System.currentTimeMillis();
 
         try (Connection conn = ds.getConnection()) {
             conn.setAutoCommit(false);
@@ -129,8 +130,12 @@ public class ImportService {
                     for (String[] row : rowsIterable) {
                         rowIndex++;
                         lastProcessedRows = rowIndex;
-                        if (requestId != null && !requestId.isBlank() && (rowIndex % 500 == 0)) {
-                            heartbeatStore.update(requestId, ImportStage.INSERTING, rowIndex, "");
+                        if (requestId != null && !requestId.isBlank()) {
+                            long now = System.currentTimeMillis();
+                            if ((rowIndex % 500 == 0) || (now - lastHeartbeatMs > 10_000)) {
+                                heartbeatStore.update(requestId, ImportStage.INSERTING, rowIndex, "");
+                                lastHeartbeatMs = now;
+                            }
                         }
 
                         // Skip if row has fewer columns than headers
@@ -148,6 +153,13 @@ public class ImportService {
                             if (batchCount >= batchSize) {
                                 importedRows += executeAndCountBatch(pstmt);
                                 batchCount = 0;
+                                if (requestId != null && !requestId.isBlank()) {
+                                    long now = System.currentTimeMillis();
+                                    if (now - lastHeartbeatMs > 2_000) {
+                                        heartbeatStore.update(requestId, ImportStage.INSERTING, rowIndex, "");
+                                        lastHeartbeatMs = now;
+                                    }
+                                }
                             }
                         } catch (SQLException e) {
                             // Primary key conflict or other SQL error

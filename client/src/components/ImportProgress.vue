@@ -241,18 +241,20 @@ const pollHeartbeat = async () => {
     lastHeartbeatAt.value = res.data?.updatedAt || Date.now()
     hasShownStallDialog.value = false
   } catch (err) {
-    // ignore transient failures; the stall detector will surface if it persists
+    // ignore transient failures; don't start stall detection until we receive at least one heartbeat
   }
 }
 
 const startHeartbeatPoll = () => {
   stopHeartbeatPoll()
-  lastHeartbeatAt.value = Date.now()
+  // Don't assume heartbeat exists yet; wait for the first successful heartbeat response.
+  lastHeartbeatAt.value = 0
   heartbeatPollTimer.value = window.setInterval(async () => {
     if (status.value !== 'importing') return
     await pollHeartbeat()
 
-    const stalled = Date.now() - (lastHeartbeatAt.value || 0) > 60_000
+    if (!lastHeartbeatAt.value) return
+    const stalled = Date.now() - lastHeartbeatAt.value > 60_000
     if (stalled && !hasShownStallDialog.value) {
       hasShownStallDialog.value = true
       try {

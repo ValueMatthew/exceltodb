@@ -226,6 +226,9 @@ public class ExcelController {
     @PostMapping("/import")
     public ResponseEntity<ImportResult> importData(@RequestBody ImportRequest request) {
         try {
+            if (!isBlank(request.getRequestId())) {
+                heartbeatStore.start(request.getRequestId());
+            }
             ImportResult result = importService.importData(request);
             if (result.isSuccess()) {
                 return ResponseEntity.ok(result);
