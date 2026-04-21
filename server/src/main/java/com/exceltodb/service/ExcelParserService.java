@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.*;
 
@@ -442,11 +443,19 @@ public class ExcelParserService {
 
         String outName = filename + ".sheet" + sheetIndex + ".standard.csv";
         Path outPath = uploadDir.resolve(outName).toAbsolutePath().normalize();
+        if (!outPath.startsWith(uploadDir)) {
+            throw new RuntimeException("非法输出路径: " + outPath);
+        }
+
+        Path tmpPath = uploadDir.resolve(outName + ".tmp." + UUID.randomUUID()).toAbsolutePath().normalize();
+        if (!tmpPath.startsWith(uploadDir)) {
+            throw new RuntimeException("非法临时输出路径: " + tmpPath);
+        }
 
         String lowerName = filename.toLowerCase();
         if (lowerName.endsWith(".csv")) {
             try (CSVReader reader = createCsvReader(inputPath);
-                 Writer writer = Files.newBufferedWriter(outPath, StandardCharsets.UTF_8)) {
+                 Writer writer = Files.newBufferedWriter(tmpPath, StandardCharsets.UTF_8)) {
                 String[] header = reader.readNext();
                 if (header == null) {
                     throw new RuntimeException("CSV文件为空");
@@ -460,42 +469,67 @@ public class ExcelParserService {
                 while ((line = reader.readNext()) != null) {
                     CsvStandardizer.writeRow(writer, line, expectedLen);
                 }
-                return outPath;
             } catch (CsvException e) {
                 throw new IOException("CSV解析失败: " + e.getMessage(), e);
             }
+            moveIntoPlace(tmpPath, outPath);
+            return outPath;
         }
 
         if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
             try (Workbook workbook = WorkbookFactory.create(inputPath.toFile());
-                 Writer writer = Files.newBufferedWriter(outPath, StandardCharsets.UTF_8)) {
+                 Writer writer = Files.newBufferedWriter(tmpPath, StandardCharsets.UTF_8)) {
                 Sheet sheet = requireSheet(workbook, sheetIndex);
                 Row headerRow = sheet.getRow(0);
                 if (headerRow == null) {
                     throw new RuntimeException("Excel该工作表为空或没有表头");
                 }
 
-                int lastCellNum = Math.max(0, headerRow.getLastCellNum());
+                int lastCellNum = headerRow.getLastCellNum();
+                if (lastCellNum <= 0) {
+                    throw new RuntimeException("Excel表头为空或没有任何列");
+                }
                 String[] header = new String[lastCellNum];
+                Set<String> seen = new HashSet<>(lastCellNum * 2);
                 for (int c = 0; c < lastCellNum; c++) {
-                    header[c] = getCellValueAsString(headerRow.getCell(c));
+                    String h = getCellValueAsString(headerRow.getCell(c));
+                    String trimmed = h == null ? "" : h.trim();
+                    if (trimmed.isBlank()) {
+                        throw new RuntimeException("Excel表头包含空列名（第 " + (c + 1) + " 列）");
+                    }
+                    if (!seen.add(trimmed)) {
+                        throw new RuntimeException("Excel表头包含重复列名: " + trimmed);
+                    }
+                    header[c] = trimmed;
                 }
                 CsvStandardizer.writeRow(writer, header, lastCellNum);
 
                 for (int r = 1; r <= sheet.getLastRowNum(); r++) {
                     Row row = sheet.getRow(r);
+                    if (row == null) {
+                        continue;
+                    }
                     String[] fields = new String[lastCellNum];
                     for (int c = 0; c < lastCellNum; c++) {
-                        Cell cell = row == null ? null : row.getCell(c);
+                        Cell cell = row.getCell(c);
                         fields[c] = getCellValueAsString(cell);
                     }
                     CsvStandardizer.writeRow(writer, fields, lastCellNum);
                 }
 
-                return outPath;
             }
+            moveIntoPlace(tmpPath, outPath);
+            return outPath;
         }
 
         throw new RuntimeException("不支持的文件格式: " + filename);
+    }
+
+    private void moveIntoPlace(Path tmpPath, Path outPath) throws IOException {
+        try {
+            Files.move(tmpPath, outPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            Files.move(tmpPath, outPath, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 }
