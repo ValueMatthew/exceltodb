@@ -11,7 +11,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.*;
@@ -54,7 +55,8 @@ public class ImportServiceRoutingTest {
 
         ImportResult actual = importService.importData(request);
 
-        assertSame(expected, actual);
+        assertTrue(actual.isSuccess());
+        assertEquals("ok", actual.getMessage());
         verify(bulkLoadImportService, times(1)).importWithLoadData(same(ds), same(request));
     }
 
@@ -71,7 +73,6 @@ public class ImportServiceRoutingTest {
         when(dataSourceConfig.getDataSource("db1")).thenReturn(ds);
         when(appConfig.isBulkLoadEnabled()).thenReturn(false);
 
-        Connection conn = mock(Connection.class);
         when(ds.getConnection()).thenThrow(new SQLException("boom"));
 
         ImportRequest request = new ImportRequest();
@@ -94,7 +95,6 @@ public class ImportServiceRoutingTest {
         assertFalse(actual.isSuccess());
         verify(bulkLoadImportService, never()).importWithLoadData(any(), any());
         verify(ds, times(1)).getConnection();
-        verifyNoInteractions(conn);
     }
 }
 

@@ -61,7 +61,8 @@ public class AppConfig {
             @SuppressWarnings("unchecked")
             Map<String, Object> importConfig = (Map<String, Object>) config.get("import");
             if (importConfig != null) {
-                batchSize = (Integer) importConfig.getOrDefault("batchSize", batchSize);
+                Object batchSizeValue = importConfig.getOrDefault("batchSize", batchSize);
+                batchSize = parseBatchSize(batchSizeValue, batchSize);
                 Object bulkLoadEnabledValue = importConfig.get("bulkLoadEnabled");
                 if (bulkLoadEnabledValue != null) {
                     bulkLoadEnabled = parseBoolean(bulkLoadEnabledValue, bulkLoadEnabled);
@@ -82,7 +83,29 @@ public class AppConfig {
     private static boolean parseBoolean(Object value, boolean defaultValue) {
         if (value == null) return defaultValue;
         if (value instanceof Boolean b) return b;
-        return Boolean.parseBoolean(String.valueOf(value).trim());
+        if (value instanceof Number n) {
+            int i = n.intValue();
+            if (i == 1) return true;
+            if (i == 0) return false;
+            throw new RuntimeException("配置 import.bulkLoadEnabled 数值仅支持 1/0，实际值: " + value);
+        }
+        String s = String.valueOf(value).trim();
+        if ("1".equals(s)) return true;
+        if ("0".equals(s)) return false;
+        if ("true".equalsIgnoreCase(s)) return true;
+        if ("false".equalsIgnoreCase(s)) return false;
+        throw new RuntimeException("配置 import.bulkLoadEnabled 仅支持 true/false 或 1/0，实际值: " + value);
+    }
+
+    private static int parseBatchSize(Object value, int defaultValue) {
+        if (value == null) return defaultValue;
+        if (value instanceof Number n) return n.intValue();
+        String s = String.valueOf(value).trim();
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            throw new RuntimeException("配置 import.batchSize 无法解析为整数，实际值: " + value, e);
+        }
     }
 
     private DatabaseInfo mapToDatabaseInfo(Map<String, Object> map) {
