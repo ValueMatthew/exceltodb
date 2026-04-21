@@ -132,7 +132,8 @@ public class BulkLoadImportService {
 
     private void loadDataLocal(Connection conn, String tmp, Path csv) throws Exception {
         Path standardCsvPath = validateAndNormalizeInfilePath(csv);
-        String infilePath = standardCsvPath.toString();
+        // MySQL accepts forward slashes on Windows; avoids needing backslash escaping in string literals.
+        String infilePath = standardCsvPath.toString().replace('\\', '/');
         String sql = "LOAD DATA LOCAL INFILE " + quoteSqlStringLiteral(infilePath) + " INTO TABLE " + quoteQualifiedIdent(tmp) + " " +
                 "CHARACTER SET utf8mb4 " +
                 "FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' " +
