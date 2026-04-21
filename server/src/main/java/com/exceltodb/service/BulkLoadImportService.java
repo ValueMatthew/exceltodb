@@ -1,5 +1,6 @@
 package com.exceltodb.service;
 
+import com.exceltodb.config.AppConfig;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
 import com.exceltodb.model.ImportStage;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -16,10 +18,12 @@ import java.security.MessageDigest;
 
 @Service
 public class BulkLoadImportService {
+    private final AppConfig appConfig;
     private final ExcelParserService excelParserService;
     private final ImportHeartbeatStore heartbeatStore;
 
-    public BulkLoadImportService(ExcelParserService excelParserService, ImportHeartbeatStore heartbeatStore) {
+    public BulkLoadImportService(AppConfig appConfig, ExcelParserService excelParserService, ImportHeartbeatStore heartbeatStore) {
+        this.appConfig = appConfig;
         this.excelParserService = excelParserService;
         this.heartbeatStore = heartbeatStore;
     }
@@ -31,6 +35,9 @@ public class BulkLoadImportService {
         if (request == null) {
             throw new IllegalArgumentException("ImportRequest must not be null");
         }
+        requireNonBlank(request.getFilename(), "filename");
+        requireNonBlank(request.getTableName(), "tableName");
+        requireNonBlank(request.getDatabaseId(), "databaseId");
 
         String requestId = request.getRequestId();
         String targetTable = request.getTableName();
@@ -124,7 +131,8 @@ public class BulkLoadImportService {
     }
 
     private void loadDataLocal(Connection conn, String tmp, Path csv) throws Exception {
-        String infilePath = csv.toAbsolutePath().toString();
+        Path standardCsvPath = validateAndNormalizeInfilePath(csv);
+        String infilePath = standardCsvPath.toString();
         String sql = "LOAD DATA LOCAL INFILE " + quoteSqlStringLiteral(infilePath) + " INTO TABLE " + quoteQualifiedIdent(tmp) + " " +
                 "CHARACTER SET utf8mb4 " +
                 "FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' " +
@@ -226,9 +234,46 @@ public class BulkLoadImportService {
         if (s == null) {
             return "NULL";
         }
-        // Use standard SQL single-quote doubling. Also escape backslashes to keep Windows paths stable.
-        String escaped = s.replace("\\", "\\\\").replace("'", "''");
+        // Use SQL-standard single-quote doubling.
+        String escaped = s.replace("'", "''");
         return "'" + escaped + "'";
+    }
+
+    private Path validateAndNormalizeInfilePath(Path standardCsvPath) {
+        if (standardCsvPath == null) {
+            throw new IllegalArgumentException("standardCsvPath must not be null");
+        }
+
+        Path allowedBaseDir = Paths.get(appConfig.getUploadTempPath()).toAbsolutePath().normalize();
+        Path normalized = standardCsvPath.toAbsolutePath().normalize();
+        if (!normalized.startsWith(allowedBaseDir)) {
+            throw new IllegalArgumentException("standardCsvPath is outside allowed base directory");
+        }
+
+        String normalizedPathStr = normalized.toString();
+        if (containsAny(normalizedPathStr, '\0', '\n', '\r')) {
+            throw new IllegalArgumentException("standardCsvPath contains illegal characters");
+        }
+        return normalized;
+    }
+
+    private static void requireNonBlank(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " must not be blank");
+        }
+    }
+
+    private static boolean containsAny(String s, char... chars) {
+        if (s == null || s.isEmpty() || chars == null || chars.length == 0) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            for (char t : chars) {
+                if (c == t) return true;
+            }
+        }
+        return false;
     }
 
     private static int safeInt(long v) {
