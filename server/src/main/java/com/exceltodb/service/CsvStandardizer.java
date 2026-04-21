@@ -1,5 +1,7 @@
 package com.exceltodb.service;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 
 public final class CsvStandardizer {
@@ -17,26 +19,50 @@ public final class CsvStandardizer {
      * {@code FIELDS TERMINATED BY ',' ENCLOSED BY '"' ESCAPED BY '"' LINES TERMINATED BY '\n'}.
      */
     public static String toCsv(List<String> header, List<String[]> rows) {
+        if (header == null) throw new IllegalArgumentException("header must not be null");
         StringBuilder sb = new StringBuilder();
         int expectedLen = header.size();
         writeRow(sb, header.toArray(new String[0]), expectedLen);
-        for (String[] r : rows) {
-            writeRow(sb, r, expectedLen);
+        if (rows != null) {
+            for (String[] r : rows) {
+                writeRow(sb, r, expectedLen);
+            }
         }
         return sb.toString();
     }
 
+    /**
+     * Writes a single RFC4180-style CSV row.
+     *
+     * <p>This overload uses {@code fields.length} as the expected column count. Prefer
+     * {@link #writeRow(StringBuilder, String[], int)} when you want consistent column counts across
+     * rows (padding/truncation).</p>
+     */
     public static void writeRow(StringBuilder sb, String[] fields) {
         writeRow(sb, fields, fields == null ? 0 : fields.length);
     }
 
+    /**
+     * Writes a single RFC4180-style CSV row with a fixed expected column count.
+     *
+     * <p>If {@code fields} has fewer elements than {@code expectedLen}, missing columns are
+     * emitted as empty strings. If {@code fields} has more elements, extras are ignored.</p>
+     */
     public static void writeRow(StringBuilder sb, String[] fields, int expectedLen) {
+        writeRow((Appendable) sb, fields, expectedLen);
+    }
+
+    public static void writeRow(Appendable out, String[] fields, int expectedLen) {
         String[] normalized = normalizeRow(fields, expectedLen);
-        for (int i = 0; i < expectedLen; i++) {
-            if (i > 0) sb.append(',');
-            sb.append('"').append(escape(normalized[i])).append('"');
+        try {
+            for (int i = 0; i < expectedLen; i++) {
+                if (i > 0) out.append(',');
+                out.append('"').append(escape(normalized[i])).append('"');
+            }
+            out.append('\n');
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
-        sb.append('\n');
     }
 
     static String[] normalizeRow(String[] fields, int expectedLen) {

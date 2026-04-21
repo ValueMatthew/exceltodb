@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class CsvStandardizerTest {
     @Test
@@ -57,6 +58,21 @@ public class CsvStandardizerTest {
                 "\"1\",\"2\",\"3\"\n",
                 csv
         );
+    }
+
+    @Test
+    void toCsv_rejectsNullHeader() {
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> CsvStandardizer.toCsv(null, List.<String[]>of(new String[]{"x"}))
+        );
+        assertEquals("header must not be null", ex.getMessage());
+    }
+
+    @Test
+    void toCsv_treatsNullRowsAsEmptyList() {
+        String csv = CsvStandardizer.toCsv(List.of("a", "b"), null);
+        assertEquals("\"a\",\"b\"\n", csv);
     }
 }
 
