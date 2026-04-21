@@ -222,4 +222,28 @@ public class DbService {
 
         return tableInfo;
     }
+
+    public List<String> getOrderedColumnNames(String databaseId, String tableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName must not be blank");
+        }
+        List<String> columns = new ArrayList<>();
+        try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
+            String sql = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+                    "ORDER BY ORDINAL_POSITION";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, conn.getCatalog());
+                ps.setString(2, tableName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        columns.add(rs.getString("COLUMN_NAME"));
+                    }
+                }
+            }
+            return columns;
+        } catch (SQLException e) {
+            throw new RuntimeException("获取表列名失败: " + e.getMessage(), e);
+        }
+    }
 }
