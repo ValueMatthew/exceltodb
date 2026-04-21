@@ -85,6 +85,48 @@ public class ExcelParserServiceStandardCsvTest {
     }
 
     @Test
+    void throwsWhenCsvHeaderCellBlank() throws Exception {
+        Path dir = Files.createTempDirectory("uploads");
+        AppConfig cfg = new AppConfig();
+        cfg.setUploadTempPath(dir.toString());
+        ExcelParserService svc = new ExcelParserService(cfg);
+
+        String csv = "a,   ,b\n" +
+                "1,2,3\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "a.csv",
+                "text/csv",
+                csv.getBytes(StandardCharsets.UTF_8)
+        );
+        var parse = svc.parseAndSave(file);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> svc.ensureStandardCsv(parse.getFilename(), 0));
+        assertTrue(ex.getMessage().contains("CSV") && ex.getMessage().contains("表头") && ex.getMessage().contains("空"));
+    }
+
+    @Test
+    void throwsWhenCsvHeaderDuplicate() throws Exception {
+        Path dir = Files.createTempDirectory("uploads");
+        AppConfig cfg = new AppConfig();
+        cfg.setUploadTempPath(dir.toString());
+        ExcelParserService svc = new ExcelParserService(cfg);
+
+        String csv = "a,a\n" +
+                "1,2\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "a.csv",
+                "text/csv",
+                csv.getBytes(StandardCharsets.UTF_8)
+        );
+        var parse = svc.parseAndSave(file);
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> svc.ensureStandardCsv(parse.getFilename(), 0));
+        assertTrue(ex.getMessage().contains("CSV") && ex.getMessage().contains("重复"));
+    }
+
+    @Test
     void throwsWhenExcelHeaderCellBlank() throws Exception {
         Path dir = Files.createTempDirectory("uploads");
         AppConfig cfg = new AppConfig();
