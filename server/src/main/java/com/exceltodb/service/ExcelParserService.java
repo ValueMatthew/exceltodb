@@ -430,4 +430,72 @@ public class ExcelParserService {
     public ParseResult getParseResult(String filename) {
         return parseCache.get(filename);
     }
+
+    public Path ensureStandardCsv(String filename, int sheetIndex) throws IOException, InvalidFormatException {
+        Path inputPath = uploadedFiles.get(filename);
+        if (inputPath == null) {
+            throw new RuntimeException("文件不存在或已过期: " + filename);
+        }
+
+        Path uploadDir = Paths.get(appConfig.getUploadTempPath()).toAbsolutePath().normalize();
+        Files.createDirectories(uploadDir);
+
+        String outName = filename + ".sheet" + sheetIndex + ".standard.csv";
+        Path outPath = uploadDir.resolve(outName).toAbsolutePath().normalize();
+
+        String lowerName = filename.toLowerCase();
+        if (lowerName.endsWith(".csv")) {
+            try (CSVReader reader = createCsvReader(inputPath);
+                 Writer writer = Files.newBufferedWriter(outPath, StandardCharsets.UTF_8)) {
+                String[] header = reader.readNext();
+                if (header == null) {
+                    throw new RuntimeException("CSV文件为空");
+                }
+                stripBomInPlace(header);
+
+                int expectedLen = header.length;
+                CsvStandardizer.writeRow(writer, header, expectedLen);
+
+                String[] line;
+                while ((line = reader.readNext()) != null) {
+                    CsvStandardizer.writeRow(writer, line, expectedLen);
+                }
+                return outPath;
+            } catch (CsvException e) {
+                throw new IOException("CSV解析失败: " + e.getMessage(), e);
+            }
+        }
+
+        if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+            try (Workbook workbook = WorkbookFactory.create(inputPath.toFile());
+                 Writer writer = Files.newBufferedWriter(outPath, StandardCharsets.UTF_8)) {
+                Sheet sheet = requireSheet(workbook, sheetIndex);
+                Row headerRow = sheet.getRow(0);
+                if (headerRow == null) {
+                    throw new RuntimeException("Excel该工作表为空或没有表头");
+                }
+
+                int lastCellNum = Math.max(0, headerRow.getLastCellNum());
+                String[] header = new String[lastCellNum];
+                for (int c = 0; c < lastCellNum; c++) {
+                    header[c] = getCellValueAsString(headerRow.getCell(c));
+                }
+                CsvStandardizer.writeRow(writer, header, lastCellNum);
+
+                for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+                    Row row = sheet.getRow(r);
+                    String[] fields = new String[lastCellNum];
+                    for (int c = 0; c < lastCellNum; c++) {
+                        Cell cell = row == null ? null : row.getCell(c);
+                        fields[c] = getCellValueAsString(cell);
+                    }
+                    CsvStandardizer.writeRow(writer, fields, lastCellNum);
+                }
+
+                return outPath;
+            }
+        }
+
+        throw new RuntimeException("不支持的文件格式: " + filename);
+    }
 }
