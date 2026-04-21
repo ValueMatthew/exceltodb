@@ -7,10 +7,12 @@ import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.security.MessageDigest;
 
 @Service
 public class BulkLoadImportService {
@@ -23,41 +25,51 @@ public class BulkLoadImportService {
     }
 
     /**
-     * Bulk import via: (optional TRUNCATE) -> staging table -> LOAD DATA LOCAL INFILE -> naive merge -> drop staging -> commit.
+     * Bulk import via: (optional TRUNCATE) -> staging table -> LOAD DATA LOCAL INFILE -> naive merge -> drop staging.
      */
     public ImportResult importWithLoadData(DataSource ds, ImportRequest request) {
-        String requestId = request == null ? null : request.getRequestId();
-        String targetTable = request == null ? null : request.getTableName();
-        String tmpTable = "__import_" + safeId(requestId);
+        if (request == null) {
+            throw new IllegalArgumentException("ImportRequest must not be null");
+        }
+
+        String requestId = request.getRequestId();
+        String targetTable = request.getTableName();
+        String tmpTable = tmpStagingTableName(requestId);
 
         long processedRows = 0;
         ImportResult result = new ImportResult();
+        ImportStage lastStage = ImportStage.READING;
 
         try (Connection conn = ds.getConnection()) {
             conn.setAutoCommit(false);
             try {
                 if ("TRUNCATE".equals(request.getImportMode())) {
-                    heartbeatUpdate(requestId, ImportStage.TRUNCATE, 0, "");
+                    lastStage = ImportStage.TRUNCATE;
+                    heartbeatUpdate(requestId, lastStage, 0, "");
                     try (Statement st = conn.createStatement()) {
-                        st.execute("TRUNCATE TABLE " + quoteIdent(targetTable));
+                        st.execute("TRUNCATE TABLE " + quoteQualifiedIdent(targetTable));
                     }
                 }
 
-                heartbeatUpdate(requestId, ImportStage.READING, 0, "");
+                lastStage = ImportStage.READING;
+                heartbeatUpdate(requestId, lastStage, 0, "");
                 Path standardCsvPath = ensureStandardCsv(request);
 
                 createStagingTable(conn, tmpTable, targetTable);
 
-                heartbeatUpdate(requestId, ImportStage.INSERTING, 0, "LOAD DATA");
+                lastStage = ImportStage.INSERTING;
+                heartbeatUpdate(requestId, lastStage, 0, "LOAD DATA");
                 loadDataLocal(conn, tmpTable, standardCsvPath);
 
                 processedRows = countRows(conn, tmpTable);
-                heartbeatUpdate(requestId, ImportStage.INSERTING, processedRows, "MERGE");
+                lastStage = ImportStage.INSERTING;
+                heartbeatUpdate(requestId, lastStage, processedRows, "MERGE");
                 mergeIntoTarget(conn, tmpTable, targetTable);
 
                 dropTableQuietly(conn, tmpTable);
 
-                heartbeatUpdate(requestId, ImportStage.COMMITTING, processedRows, "");
+                lastStage = ImportStage.COMMITTING;
+                heartbeatUpdate(requestId, lastStage, processedRows, "");
                 conn.commit();
 
                 result.setSuccess(true);
@@ -74,7 +86,9 @@ public class BulkLoadImportService {
                 }
                 dropTableQuietly(conn, tmpTable);
 
-                heartbeatStoreError(requestId, processedRows, e.getMessage());
+                String errorMessage = e.getMessage();
+                heartbeatUpdate(requestId, lastStage, processedRows, "ERROR@" + lastStage + ": " + (errorMessage == null ? "" : errorMessage));
+                heartbeatStoreError(requestId, processedRows, "ERROR@" + lastStage + ": " + (errorMessage == null ? "" : errorMessage));
                 result.setSuccess(false);
                 result.setImportedRows(safeInt(processedRows));
                 result.setFailedRows(0);
@@ -82,7 +96,9 @@ public class BulkLoadImportService {
                 return result;
             }
         } catch (Exception e) {
-            heartbeatStoreError(requestId, processedRows, e.getMessage());
+            String errorMessage = e.getMessage();
+            heartbeatUpdate(requestId, lastStage, processedRows, "ERROR@" + lastStage + ": " + (errorMessage == null ? "" : errorMessage));
+            heartbeatStoreError(requestId, processedRows, "ERROR@" + lastStage + ": " + (errorMessage == null ? "" : errorMessage));
             result.setSuccess(false);
             result.setImportedRows(safeInt(processedRows));
             result.setFailedRows(0);
@@ -102,19 +118,19 @@ public class BulkLoadImportService {
 
     private void createStagingTable(Connection conn, String tmp, String target) throws Exception {
         try (Statement st = conn.createStatement()) {
-            st.execute("DROP TABLE IF EXISTS " + quoteIdent(tmp));
-            st.execute("CREATE TABLE " + quoteIdent(tmp) + " LIKE " + quoteIdent(target));
+            st.execute("DROP TABLE IF EXISTS " + quoteQualifiedIdent(tmp));
+            st.execute("CREATE TABLE " + quoteQualifiedIdent(tmp) + " LIKE " + quoteQualifiedIdent(target));
         }
     }
 
     private void loadDataLocal(Connection conn, String tmp, Path csv) throws Exception {
-        String sql = "LOAD DATA LOCAL INFILE ? INTO TABLE " + quoteIdent(tmp) + " " +
+        String infilePath = csv.toAbsolutePath().toString();
+        String sql = "LOAD DATA LOCAL INFILE " + quoteSqlStringLiteral(infilePath) + " INTO TABLE " + quoteQualifiedIdent(tmp) + " " +
                 "CHARACTER SET utf8mb4 " +
                 "FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' " +
                 "LINES TERMINATED BY '\\n' " +
                 "IGNORE 1 LINES";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, csv.toAbsolutePath().toString());
             ps.execute();
         }
     }
@@ -124,13 +140,13 @@ public class BulkLoadImportService {
      */
     private void mergeIntoTarget(Connection conn, String tmp, String target) throws Exception {
         try (Statement st = conn.createStatement()) {
-            st.execute("INSERT INTO " + quoteIdent(target) + " SELECT * FROM " + quoteIdent(tmp));
+            st.execute("INSERT INTO " + quoteQualifiedIdent(target) + " SELECT * FROM " + quoteQualifiedIdent(tmp));
         }
     }
 
     private long countRows(Connection conn, String table) throws Exception {
         try (Statement st = conn.createStatement();
-             var rs = st.executeQuery("SELECT COUNT(*) FROM " + quoteIdent(table))) {
+             var rs = st.executeQuery("SELECT COUNT(*) FROM " + quoteQualifiedIdent(table))) {
             rs.next();
             return rs.getLong(1);
         }
@@ -138,7 +154,7 @@ public class BulkLoadImportService {
 
     private void dropTableQuietly(Connection conn, String table) {
         try (Statement st = conn.createStatement()) {
-            st.execute("DROP TABLE IF EXISTS " + quoteIdent(table));
+            st.execute("DROP TABLE IF EXISTS " + quoteQualifiedIdent(table));
         } catch (Exception ignored) {
             // best-effort cleanup only
         }
@@ -159,18 +175,60 @@ public class BulkLoadImportService {
         heartbeatStore.error(requestId, processedRows, message);
     }
 
-    private static String safeId(String requestId) {
-        if (requestId == null || requestId.isBlank()) {
-            return "no_request";
+    private static String tmpStagingTableName(String requestId) {
+        String prefix = "__import_";
+        String hash10 = shortSha256Hex(requestId == null ? "no_request" : requestId).substring(0, 10);
+        String name = prefix + hash10;
+        if (name.length() > 64) {
+            // defensive: should never happen, but keep MySQL identifier max length invariant
+            return name.substring(0, 64);
         }
-        return requestId.replaceAll("[^a-zA-Z0-9_]", "_");
+        return name;
     }
 
-    private static String quoteIdent(String ident) {
-        if (ident == null || ident.isBlank()) {
+    private static String shortSha256Hex(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] dig = md.digest((s == null ? "" : s).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(dig.length * 2);
+            for (byte b : dig) {
+                sb.append(Character.forDigit((b >>> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to hash requestId", e);
+        }
+    }
+
+    private static String quoteQualifiedIdent(String name) {
+        if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Identifier is blank");
         }
-        return "`" + ident.replace("`", "``") + "`";
+        String[] parts = name.split("\\.");
+        if (parts.length == 1) {
+            return quoteIdentPart(parts[0]);
+        }
+        if (parts.length == 2) {
+            return quoteIdentPart(parts[0]) + "." + quoteIdentPart(parts[1]);
+        }
+        throw new IllegalArgumentException("Invalid qualified identifier (expected [table] or [db.table]): " + name);
+    }
+
+    private static String quoteIdentPart(String part) {
+        if (part == null || part.isBlank()) {
+            throw new IllegalArgumentException("Identifier part is blank");
+        }
+        return "`" + part.replace("`", "``") + "`";
+    }
+
+    private static String quoteSqlStringLiteral(String s) {
+        if (s == null) {
+            return "NULL";
+        }
+        // Use standard SQL single-quote doubling. Also escape backslashes to keep Windows paths stable.
+        String escaped = s.replace("\\", "\\\\").replace("'", "''");
+        return "'" + escaped + "'";
     }
 
     private static int safeInt(long v) {
