@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class CsvStandardizerTest {
     @Test
-    void writesHeaderAndEscapesQuotesAndNewlines() {
+    void writesHeaderAndDoublesQuotes_rfc4180_andPreservesNewlines() {
         String csv = CsvStandardizer.toCsv(
                 List.of("a", "b", "c"),
                 List.of(
@@ -21,6 +21,40 @@ public class CsvStandardizerTest {
                 "\"a\",\"b\",\"c\"\n" +
                 "\"x\",\"he\"\"llo\",\"line1\nline2\"\n" +
                 "\"\",\"\",\"z\"\n",
+                csv
+        );
+    }
+
+    @Test
+    void escapesCommasAndQuoteOnlyField_andNullBecomesEmpty() {
+        String csv = CsvStandardizer.toCsv(
+                List.of("a", "b", "c"),
+                List.<String[]>of(
+                        new String[]{"a,b", "\"", null}
+                )
+        );
+
+        assertEquals(
+                "\"a\",\"b\",\"c\"\n" +
+                "\"a,b\",\"\"\"\",\"\"\n",
+                csv
+        );
+    }
+
+    @Test
+    void normalizesRowLength_padMissing_truncateExtra() {
+        String csv = CsvStandardizer.toCsv(
+                List.of("a", "b", "c"),
+                List.of(
+                        new String[]{"x", "y"},
+                        new String[]{"1", "2", "3", "4"}
+                )
+        );
+
+        assertEquals(
+                "\"a\",\"b\",\"c\"\n" +
+                "\"x\",\"y\",\"\"\n" +
+                "\"1\",\"2\",\"3\"\n",
                 csv
         );
     }
