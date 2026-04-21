@@ -171,6 +171,28 @@ public class DbService {
         return null;
     }
 
+    public List<String> getPrimaryKeyColumns(String databaseId, String tableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName must not be blank");
+        }
+        List<String> pkCols = new ArrayList<>();
+        try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
+            try (ResultSet rs = metaData.getPrimaryKeys(catalog, null, tableName.trim())) {
+                while (rs.next()) {
+                    String col = rs.getString("COLUMN_NAME");
+                    if (col != null && !col.isBlank()) {
+                        pkCols.add(col);
+                    }
+                }
+            }
+            return pkCols;
+        } catch (SQLException e) {
+            throw new RuntimeException("获取主键列失败: " + e.getMessage(), e);
+        }
+    }
+
     public TableInfo getTableInfo(String databaseId, String tableName) {
         TableInfo tableInfo = new TableInfo();
         List<String> columns = new ArrayList<>();

@@ -19,8 +19,11 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -74,7 +77,8 @@ public class BulkLoadImportService {
                 heartbeatUpdate(requestId, lastStage, 0, "");
                 Path standardCsvPath = ensureStandardCsv(request);
                 List<String> headerColumns = readStandardCsvHeaderColumns(standardCsvPath);
-                validateHeaderColumnsAgainstTable(request.getDatabaseId(), baseTableName, headerColumns);
+                headerColumns = validateAndNormalizeHeaderColumns(headerColumns);
+                headerColumns = validateHeaderColumnsAgainstTable(request.getDatabaseId(), baseTableName, headerColumns);
 
                 createStagingTable(conn, tmpTable, targetTable);
 
@@ -190,30 +194,37 @@ public class BulkLoadImportService {
             conflictStrategy = "ERROR";
         }
 
-        String pk = null;
+        List<String> pkCols = List.of();
         if (request != null && request.getDatabaseId() != null && !request.getDatabaseId().isBlank()) {
-            pk = dbService.getTableInfo(request.getDatabaseId(), baseTableName).getPrimaryKey();
+            pkCols = dbService.getPrimaryKeyColumns(request.getDatabaseId(), baseTableName);
+        }
+        Set<String> pkLower = new HashSet<>();
+        for (String pk : pkCols) {
+            if (pk != null && !pk.isBlank()) {
+                pkLower.add(pk.trim().toLowerCase(Locale.ROOT));
+            }
         }
 
         String colsSql = joinQuotedIdents(headerColumns);
-        String selectColsSql = joinQualifiedSelectCols(headerColumns, tmp);
+        String srcAlias = "src";
+        String selectColsSql = joinQualifiedSelectCols(headerColumns, tmp, srcAlias);
 
         try (Statement st = conn.createStatement()) {
             if ("IGNORE".equals(conflictStrategy)) {
                 st.execute("INSERT IGNORE INTO " + quoteQualifiedIdent(target) + " (" + colsSql + ") " +
-                        "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp));
+                        "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp) + " AS " + quoteIdentPart(srcAlias));
                 return;
             }
             if ("UPDATE".equals(conflictStrategy)) {
-                String updateClause = buildOnDuplicateKeyUpdateClause(headerColumns, pk);
+                String updateClause = buildOnDuplicateKeyUpdateClause(headerColumns, pkLower, srcAlias);
                 st.execute("INSERT INTO " + quoteQualifiedIdent(target) + " (" + colsSql + ") " +
-                        "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp) + " " +
+                        "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp) + " AS " + quoteIdentPart(srcAlias) + " " +
                         "ON DUPLICATE KEY UPDATE " + updateClause);
                 return;
             }
 
             st.execute("INSERT INTO " + quoteQualifiedIdent(target) + " (" + colsSql + ") " +
-                    "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp));
+                    "SELECT " + selectColsSql + " FROM " + quoteQualifiedIdent(tmp) + " AS " + quoteIdentPart(srcAlias));
         }
     }
 
@@ -280,10 +291,10 @@ public class BulkLoadImportService {
         }
         String[] parts = name.split("\\.");
         if (parts.length == 1) {
-            return quoteIdentPart(parts[0]);
+            return quoteIdentPart(parts[0].trim());
         }
         if (parts.length == 2) {
-            return quoteIdentPart(parts[0]) + "." + quoteIdentPart(parts[1]);
+            return quoteIdentPart(parts[0].trim()) + "." + quoteIdentPart(parts[1].trim());
         }
         throw new IllegalArgumentException("Invalid qualified identifier (expected [table] or [db.table]): " + name);
     }
@@ -352,8 +363,8 @@ public class BulkLoadImportService {
             throw new IllegalArgumentException("tableName must not be blank");
         }
         String[] parts = qualifiedTable.split("\\.");
-        if (parts.length == 1) return parts[0];
-        if (parts.length == 2) return parts[1];
+        if (parts.length == 1) return parts[0].trim();
+        if (parts.length == 2) return parts[1].trim();
         throw new IllegalArgumentException("Invalid qualified identifier (expected [table] or [db.table]): " + qualifiedTable);
     }
 
@@ -363,7 +374,7 @@ public class BulkLoadImportService {
         }
         String[] parts = qualifiedTable.split("\\.");
         if (parts.length == 2) {
-            String dbPrefix = parts[0];
+            String dbPrefix = parts[0].trim();
             String catalog = conn.getCatalog();
             if (catalog != null && !catalog.isBlank() && !catalog.equalsIgnoreCase(dbPrefix)) {
                 throw new IllegalArgumentException("tableName schema prefix does not match connection catalog: " + dbPrefix + " != " + catalog);
@@ -393,14 +404,48 @@ public class BulkLoadImportService {
         }
     }
 
-    private void validateHeaderColumnsAgainstTable(String databaseId, String baseTableName, List<String> headerColumns) {
+    private static List<String> validateAndNormalizeHeaderColumns(List<String> headerColumns) {
+        if (headerColumns == null || headerColumns.isEmpty()) {
+            throw new IllegalArgumentException("CSV header is empty");
+        }
+
+        List<String> trimmed = new ArrayList<>(headerColumns.size());
+        Set<String> seenLower = new HashSet<>();
+        for (String raw : headerColumns) {
+            String c = raw == null ? "" : raw.trim();
+            if (c.isEmpty()) {
+                throw new IllegalArgumentException("CSV header contains empty column name");
+            }
+            String lower = c.toLowerCase(Locale.ROOT);
+            if (!seenLower.add(lower)) {
+                throw new IllegalArgumentException("CSV header contains duplicate column (case-insensitive): " + c);
+            }
+            trimmed.add(c);
+        }
+        return trimmed;
+    }
+
+    private List<String> validateHeaderColumnsAgainstTable(String databaseId, String baseTableName, List<String> headerColumns) {
         List<String> tableColumns = dbService.getOrderedColumnNames(databaseId, baseTableName);
-        Set<String> tableColumnSet = new HashSet<>(tableColumns);
+        if (tableColumns == null || tableColumns.isEmpty()) {
+            throw new IllegalArgumentException("Target table not found or no access: " + baseTableName);
+        }
+
+        Map<String, String> lowerToActual = new HashMap<>(tableColumns.size());
+        for (String c : tableColumns) {
+            if (c == null) continue;
+            lowerToActual.put(c.toLowerCase(Locale.ROOT), c);
+        }
+
+        List<String> canonicalHeaderCols = new ArrayList<>(headerColumns.size());
         for (String col : headerColumns) {
-            if (!tableColumnSet.contains(col)) {
+            String actual = lowerToActual.get(col.toLowerCase(Locale.ROOT));
+            if (actual == null) {
                 throw new IllegalArgumentException("CSV header column not found in target table: " + col);
             }
+            canonicalHeaderCols.add(actual);
         }
+        return canonicalHeaderCols;
     }
 
     private static String joinQuotedIdents(List<String> cols) {
@@ -413,30 +458,39 @@ public class BulkLoadImportService {
     }
 
     private static String joinQualifiedSelectCols(List<String> cols, String fromTable) {
+        return joinQualifiedSelectCols(cols, fromTable, null);
+    }
+
+    private static String joinQualifiedSelectCols(List<String> cols, String fromTable, String alias) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) sb.append(",");
-            sb.append(quoteQualifiedIdent(fromTable)).append(".").append(quoteIdentPart(cols.get(i)));
+            if (alias == null || alias.isBlank()) {
+                sb.append(quoteQualifiedIdent(fromTable));
+            } else {
+                sb.append(quoteIdentPart(alias));
+            }
+            sb.append(".").append(quoteIdentPart(cols.get(i)));
         }
         return sb.toString();
     }
 
-    private static String buildOnDuplicateKeyUpdateClause(List<String> headerColumns, String primaryKey) {
-        String pkNorm = primaryKey == null ? null : primaryKey.trim();
+    private static String buildOnDuplicateKeyUpdateClause(List<String> headerColumns, Set<String> primaryKeysLower, String sourceAlias) {
+        Set<String> pkLower = primaryKeysLower == null ? Set.of() : primaryKeysLower;
         StringBuilder sb = new StringBuilder();
         boolean first = true;
         for (String c : headerColumns) {
-            if (pkNorm != null && !pkNorm.isEmpty() && pkNorm.equalsIgnoreCase(c)) {
+            if (c != null && pkLower.contains(c.toLowerCase(Locale.ROOT))) {
                 continue;
             }
             if (!first) sb.append(", ");
             first = false;
             String qc = quoteIdentPart(c);
-            sb.append(qc).append("=VALUES(").append(qc).append(")");
+            sb.append(qc).append("=").append(quoteIdentPart(sourceAlias)).append(".").append(qc);
         }
         if (first) {
             // no-op update to satisfy MySQL syntax; primary key was the only imported column
-            String qcPk = quoteIdentPart(pkNorm == null || pkNorm.isEmpty() ? headerColumns.get(0) : pkNorm);
+            String qcPk = quoteIdentPart(headerColumns.get(0));
             return qcPk + "=" + qcPk;
         }
         return sb.toString();
