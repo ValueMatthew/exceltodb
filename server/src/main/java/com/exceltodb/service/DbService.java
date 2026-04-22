@@ -2,6 +2,7 @@ package com.exceltodb.service;
 
 import com.exceltodb.config.AppConfig;
 import com.exceltodb.config.DataSourceConfig;
+import com.exceltodb.model.ColumnMeta;
 import com.exceltodb.model.DatabaseInfo;
 import com.exceltodb.model.TablePreviewResponse;
 import com.exceltodb.model.TableInfo;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -266,6 +268,41 @@ public class DbService {
             return columns;
         } catch (SQLException e) {
             throw new RuntimeException("获取表列名失败: " + e.getMessage(), e);
+        }
+    }
+
+    public List<ColumnMeta> getColumnMetas(String databaseId, String tableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName must not be blank");
+        }
+        List<ColumnMeta> metas = new ArrayList<>();
+        try (Connection conn = dataSourceConfig.getDataSource(databaseId).getConnection()) {
+            String sql = "SELECT COLUMN_NAME, LOWER(DATA_TYPE) AS DATA_TYPE_LOWER, LOWER(COLUMN_TYPE) AS COLUMN_TYPE_LOWER, " +
+                    "IS_NULLABLE, NUMERIC_PRECISION, NUMERIC_SCALE " +
+                    "FROM INFORMATION_SCHEMA.COLUMNS " +
+                    "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+                    "ORDER BY ORDINAL_POSITION";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, conn.getCatalog());
+                ps.setString(2, tableName.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        ColumnMeta m = new ColumnMeta();
+                        m.setName(rs.getString("COLUMN_NAME"));
+                        m.setDataType(rs.getString("DATA_TYPE_LOWER"));
+                        m.setColumnType(rs.getString("COLUMN_TYPE_LOWER"));
+                        m.setNullable("YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")));
+                        Object p = rs.getObject("NUMERIC_PRECISION");
+                        Object s = rs.getObject("NUMERIC_SCALE");
+                        m.setPrecision(p == null ? null : ((Number) p).intValue());
+                        m.setScale(s == null ? null : ((Number) s).intValue());
+                        metas.add(m);
+                    }
+                }
+            }
+            return metas;
+        } catch (SQLException e) {
+            throw new RuntimeException("获取表列元数据失败: " + e.getMessage(), e);
         }
     }
 }
