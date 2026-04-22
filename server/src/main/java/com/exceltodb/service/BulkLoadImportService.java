@@ -87,6 +87,10 @@ public class BulkLoadImportService {
                 loadDataLocal(conn, tmpTable, standardCsvPath, headerColumns);
 
                 processedRows = countRows(conn, tmpTable);
+                if (processedRows <= 0) {
+                    throw new RuntimeException(
+                            "Bulk load 未写入任何行：当前数据库可能禁用 LOAD DATA LOCAL INFILE（常见错误 1148），或 CSV 未解析出数据行。请改用 JDBC 导入或联系 DBA 开启 LOCAL INFILE。");
+                }
                 lastStage = ImportStage.INSERTING;
                 heartbeatUpdate(requestId, lastStage, processedRows, "MERGE");
                 mergeIntoTarget(conn, tmpTable, targetTable, request, headerColumns, baseTableName);
