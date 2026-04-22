@@ -30,14 +30,17 @@ public class ImportService {
     private final DbService dbService;
     private final AppConfig appConfig;
     private final ImportHeartbeatStore heartbeatStore;
+    private final BulkLoadImportService bulkLoadImportService;
 
     public ImportService(DataSourceConfig dataSourceConfig, ExcelParserService excelParserService,
-                        DbService dbService, AppConfig appConfig, ImportHeartbeatStore heartbeatStore) {
+                        DbService dbService, AppConfig appConfig, ImportHeartbeatStore heartbeatStore,
+                        BulkLoadImportService bulkLoadImportService) {
         this.dataSourceConfig = dataSourceConfig;
         this.excelParserService = excelParserService;
         this.dbService = dbService;
         this.appConfig = appConfig;
         this.heartbeatStore = heartbeatStore;
+        this.bulkLoadImportService = bulkLoadImportService;
     }
 
     public ImportResult importData(ImportRequest request) throws IOException, InvalidFormatException {
@@ -48,6 +51,17 @@ public class ImportService {
         if (requestId != null && !requestId.isBlank()) {
             heartbeatStore.start(requestId);
         }
+
+        if (appConfig.isBulkLoadEnabled()) {
+            try {
+                return bulkLoadImportService.importWithLoadData(ds, request);
+            } catch (Exception e) {
+                result.setSuccess(false);
+                result.setMessage("导入失败: " + e.getMessage());
+                return result;
+            }
+        }
+
         long lastProcessedRows = 0;
         long lastHeartbeatMs = System.currentTimeMillis();
 

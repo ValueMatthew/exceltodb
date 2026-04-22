@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.*;
 
@@ -429,5 +430,130 @@ public class ExcelParserService {
 
     public ParseResult getParseResult(String filename) {
         return parseCache.get(filename);
+    }
+
+    public Path ensureStandardCsv(String filename, int sheetIndex) throws IOException, InvalidFormatException {
+        Path inputPath = uploadedFiles.get(filename);
+        if (inputPath == null) {
+            throw new RuntimeException("文件不存在或已过期: " + filename);
+        }
+
+        Path uploadDir = Paths.get(appConfig.getUploadTempPath()).toAbsolutePath().normalize();
+        Files.createDirectories(uploadDir);
+
+        String outName = filename + ".sheet" + sheetIndex + ".standard.csv";
+        Path outPath = uploadDir.resolve(outName).toAbsolutePath().normalize();
+        if (!outPath.startsWith(uploadDir)) {
+            throw new RuntimeException("非法输出路径: " + outPath);
+        }
+
+        Path tmpPath = uploadDir.resolve(outName + ".tmp." + UUID.randomUUID()).toAbsolutePath().normalize();
+        if (!tmpPath.startsWith(uploadDir)) {
+            throw new RuntimeException("非法临时输出路径: " + tmpPath);
+        }
+
+        String lowerName = filename.toLowerCase();
+        try {
+            if (lowerName.endsWith(".csv")) {
+                try (CSVReader reader = createCsvReader(inputPath);
+                     Writer writer = Files.newBufferedWriter(tmpPath, StandardCharsets.UTF_8)) {
+                    String[] header = reader.readNext();
+                    if (header == null) {
+                        throw new RuntimeException("CSV文件为空");
+                    }
+                    stripBomInPlace(header);
+
+                    if (header.length <= 0) {
+                        throw new RuntimeException("CSV表头为空或没有任何列");
+                    }
+                    Set<String> seen = new HashSet<>(header.length * 2);
+                    for (int c = 0; c < header.length; c++) {
+                        String h = header[c];
+                        String trimmed = h == null ? "" : h.trim();
+                        if (trimmed.isBlank()) {
+                            throw new RuntimeException("CSV表头包含空列名（第 " + (c + 1) + " 列）");
+                        }
+                        if (!seen.add(trimmed)) {
+                            throw new RuntimeException("CSV表头包含重复列名（区分大小写）: " + trimmed);
+                        }
+                        header[c] = trimmed;
+                    }
+
+                    int expectedLen = header.length;
+                    CsvStandardizer.writeRow(writer, header, expectedLen);
+
+                    String[] line;
+                    while ((line = reader.readNext()) != null) {
+                        CsvStandardizer.writeRow(writer, line, expectedLen);
+                    }
+                } catch (CsvException e) {
+                    throw new IOException("CSV解析失败: " + e.getMessage(), e);
+                }
+                moveIntoPlace(tmpPath, outPath);
+                return outPath;
+            }
+
+            if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+                try (Workbook workbook = WorkbookFactory.create(inputPath.toFile());
+                     Writer writer = Files.newBufferedWriter(tmpPath, StandardCharsets.UTF_8)) {
+                    Sheet sheet = requireSheet(workbook, sheetIndex);
+                    Row headerRow = sheet.getRow(0);
+                    if (headerRow == null) {
+                        throw new RuntimeException("Excel该工作表为空或没有表头");
+                    }
+
+                    int lastCellNum = headerRow.getLastCellNum();
+                    if (lastCellNum <= 0) {
+                        throw new RuntimeException("Excel表头为空或没有任何列");
+                    }
+                    String[] header = new String[lastCellNum];
+                    Set<String> seen = new HashSet<>(lastCellNum * 2);
+                    for (int c = 0; c < lastCellNum; c++) {
+                        String h = getCellValueAsString(headerRow.getCell(c));
+                        String trimmed = h == null ? "" : h.trim();
+                        if (trimmed.isBlank()) {
+                            throw new RuntimeException("Excel表头包含空列名（第 " + (c + 1) + " 列）");
+                        }
+                        if (!seen.add(trimmed)) {
+                            throw new RuntimeException("Excel表头包含重复列名: " + trimmed);
+                        }
+                        header[c] = trimmed;
+                    }
+                    CsvStandardizer.writeRow(writer, header, lastCellNum);
+
+                    for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+                        Row row = sheet.getRow(r);
+                        if (row == null) {
+                            continue;
+                        }
+                        String[] fields = new String[lastCellNum];
+                        for (int c = 0; c < lastCellNum; c++) {
+                            Cell cell = row.getCell(c);
+                            fields[c] = getCellValueAsString(cell);
+                        }
+                        CsvStandardizer.writeRow(writer, fields, lastCellNum);
+                    }
+
+                }
+                moveIntoPlace(tmpPath, outPath);
+                return outPath;
+            }
+
+            throw new RuntimeException("不支持的文件格式: " + filename);
+        } finally {
+            try {
+                Files.deleteIfExists(tmpPath);
+            } catch (Exception ignored) {
+                // best-effort cleanup only
+            }
+        }
+    }
+
+    private void moveIntoPlace(Path tmpPath, Path outPath) throws IOException {
+        try {
+            Files.move(tmpPath, outPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            Files.move(tmpPath, outPath, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 }
