@@ -4,11 +4,13 @@ import com.exceltodb.config.AppConfig;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
 import com.exceltodb.model.ImportStage;
+import com.mysql.cj.jdbc.JdbcStatement;
 import com.opencsv.CSVReader;
 import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
+import java.io.InputStream;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -111,6 +113,12 @@ public class BulkLoadImportService {
                     if (!loadDataSqlWarnings.isBlank()) {
                         baseMsg = baseMsg + " MySQL: " + loadDataSqlWarnings;
                     }
+                    try {
+                        long sz = Files.size(standardCsvPath);
+                        baseMsg = baseMsg + " 诊断: 标准CSV约 " + sz + " 字节。";
+                    } catch (Exception ignored) {
+                        // best-effort diagnostics only
+                    }
                     result.setMessage(baseMsg);
                     heartbeatStoreError(requestId, processedRows, result.getMessage());
                     return result;
@@ -172,8 +180,6 @@ public class BulkLoadImportService {
             throw new IllegalArgumentException("headerColumns must not be empty");
         }
         Path standardCsvPath = validateAndNormalizeInfilePath(csv);
-        // MySQL accepts forward slashes on Windows; avoids needing backslash escaping in string literals.
-        String infilePath = standardCsvPath.toString().replace('\\', '/');
 
         List<String> userVars = new ArrayList<>(headerColumns.size());
         for (int i = 1; i <= headerColumns.size(); i++) {
@@ -187,15 +193,22 @@ public class BulkLoadImportService {
             setClause.append(col).append("=NULLIF(").append(v).append(", '')");
         }
 
-        String sql = "LOAD DATA LOCAL INFILE " + quoteSqlStringLiteral(infilePath) + " INTO TABLE " + quoteQualifiedIdent(tmp) + " " +
+        // Empty INFILE name + setLocalInfileInputStream: avoids Windows path/encoding issues where path-based LOAD inserts 0 rows.
+        String sql = "LOAD DATA LOCAL INFILE '' INTO TABLE " + quoteQualifiedIdent(tmp) + " " +
                 "CHARACTER SET utf8mb4 " +
                 "FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' " +
                 "LINES TERMINATED BY '\\n' " +
                 "IGNORE 1 LINES " +
                 "(" + String.join(",", userVars) + ") " +
                 "SET " + setClause;
-        // Connector/J: LOAD DATA LOCAL INFILE is not reliable via PreparedStatement protocol; use Statement.
-        try (Statement st = conn.createStatement()) {
+
+        try (Statement st = conn.createStatement();
+             InputStream in = Files.newInputStream(standardCsvPath)) {
+            if (!st.isWrapperFor(JdbcStatement.class)) {
+                throw new IllegalStateException(
+                        "当前 JDBC 连接无法 unwrap 为 MySQL JdbcStatement，无法流式上传 LOCAL INFILE。请确认使用 mysql-connector-j 且连接未被不兼容的代理包装。");
+            }
+            st.unwrap(JdbcStatement.class).setLocalInfileInputStream(in);
             st.execute(sql);
         }
     }
