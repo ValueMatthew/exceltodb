@@ -32,8 +32,7 @@ public class DataSourceConfig {
         }
 
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(String.format(
-                "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&allowLoadLocalInfile=true&rewriteBatchedStatements=true",
+        config.setJdbcUrl(String.format("jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&allowLoadLocalInfile=true",
                 dbInfo.getHost(), dbInfo.getPort(), dbInfo.getDatabase()));
         config.setUsername(dbInfo.getUsername());
         config.setPassword(dbInfo.getPassword());
