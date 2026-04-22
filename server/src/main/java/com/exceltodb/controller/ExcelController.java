@@ -6,6 +6,7 @@ import com.exceltodb.service.ExcelParserService;
 import com.exceltodb.service.ImportHeartbeatStore;
 import com.exceltodb.service.ImportService;
 import com.exceltodb.service.TableMatcherService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -232,9 +233,9 @@ public class ExcelController {
             ImportResult result = importService.importData(request);
             if (result.isSuccess()) {
                 return ResponseEntity.ok(result);
-            } else {
-                return ResponseEntity.status(500).body(result);
             }
+            // Business outcome (e.g. TRUNCATE with zero rows): not a server fault — avoid misleading HTTP 500.
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(result);
         } catch (Exception e) {
             ImportResult errorResult = new ImportResult();
             errorResult.setSuccess(false);
