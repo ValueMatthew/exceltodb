@@ -6,7 +6,6 @@ import com.exceltodb.model.CreateTableRequest;
 import com.exceltodb.model.ImportStage;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
-import com.exceltodb.model.ParseResult;
 import com.exceltodb.model.TableInfo;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
@@ -45,52 +44,26 @@ public class ImportService {
     }
 
     public ImportResult importData(ImportRequest request) throws IOException, InvalidFormatException {
+        ImportResult result = new ImportResult();
+
         DataSource ds = dataSourceConfig.getDataSource(request.getDatabaseId());
         String requestId = request.getRequestId();
         if (requestId != null && !requestId.isBlank()) {
             heartbeatStore.start(requestId);
         }
 
-        ParseResult pr = excelParserService.getParseResult(request.getFilename());
-
         if (appConfig.isBulkLoadEnabled()) {
-            ImportResult bulk;
             try {
-                bulk = bulkLoadImportService.importWithLoadData(ds, request);
+                return bulkLoadImportService.importWithLoadData(ds, request);
             } catch (Exception e) {
-                bulk = new ImportResult();
-                bulk.setSuccess(false);
-                bulk.setImportedRows(0);
-                bulk.setMessage("导入失败: " + e.getMessage());
+                result.setSuccess(false);
+                result.setMessage("导入失败: " + e.getMessage());
+                return result;
             }
-            if (shouldFallbackToJdbc(bulk, pr)) {
-                return importDataJdbc(ds, request);
-            }
-            return bulk;
         }
 
-        return importDataJdbc(ds, request);
-    }
-
-    private static boolean shouldFallbackToJdbc(ImportResult bulk, ParseResult pr) {
-        if (bulk == null) {
-            return true;
-        }
-        String msg = bulk.getMessage() == null ? "" : bulk.getMessage();
-        if (!bulk.isSuccess()) {
-            return true;
-        }
-        if (msg.contains("1148") || msg.contains("LOCAL INFILE") || msg.contains("Bulk load 未写入任何行")) {
-            return true;
-        }
-        return bulk.isSuccess() && bulk.getImportedRows() == 0 && pr != null && pr.getRowCount() > 0;
-    }
-
-    private ImportResult importDataJdbc(DataSource ds, ImportRequest request) throws IOException, InvalidFormatException {
-        ImportResult result = new ImportResult();
         long lastProcessedRows = 0;
         long lastHeartbeatMs = System.currentTimeMillis();
-        String requestId = request.getRequestId();
 
         try (Connection conn = ds.getConnection()) {
             conn.setAutoCommit(false);
