@@ -283,6 +283,7 @@ const startImport = async () => {
   hasShownStallDialog.value = false
   startElapsed()
   startHeartbeatPoll()
+  await pollHeartbeat()
   await nextTick()
 
   try {

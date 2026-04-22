@@ -190,8 +190,14 @@ public class ImportService {
                     }
 
                     result.setImportedRows(importedRows);
-                    result.setSuccess(true);
-                    result.setMessage("导入成功");
+                    if ("TRUNCATE".equals(request.getImportMode()) && importedRows == 0) {
+                        result.setSuccess(false);
+                        result.setMessage(
+                                "导入完成但未写入任何数据行：目标表已按 TRUNCATE 清空，但本次未写入任何行。请检查数据文件与列映射。");
+                    } else {
+                        result.setSuccess(true);
+                        result.setMessage("导入成功");
+                    }
 
                     if (requestId != null && !requestId.isBlank()) {
                         heartbeatStore.update(requestId, ImportStage.COMMITTING, rowIndex, "");
@@ -204,7 +210,11 @@ public class ImportService {
 
                 conn.commit();
                 if (requestId != null && !requestId.isBlank()) {
-                    heartbeatStore.success(requestId, lastProcessedRows);
+                    if (result.isSuccess()) {
+                        heartbeatStore.success(requestId, lastProcessedRows);
+                    } else {
+                        heartbeatStore.error(requestId, result.getImportedRows(), result.getMessage());
+                    }
                 }
 
             } catch (Exception e) {

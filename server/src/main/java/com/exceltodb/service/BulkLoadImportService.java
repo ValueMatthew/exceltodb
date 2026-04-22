@@ -97,8 +97,19 @@ public class BulkLoadImportService {
                 heartbeatUpdate(requestId, lastStage, processedRows, "");
                 conn.commit();
 
+                int imported = safeInt(processedRows);
+                if ("TRUNCATE".equals(request.getImportMode()) && processedRows <= 0) {
+                    result.setSuccess(false);
+                    result.setImportedRows(imported);
+                    result.setFailedRows(0);
+                    result.setMessage(
+                            "导入完成但未写入任何数据行：目标表已按 TRUNCATE 清空，但本次文件未产生可导入的行。请检查 CSV/Excel 是否有数据行，或 LOAD DATA LOCAL INFILE 是否实际写入了数据。");
+                    heartbeatStoreError(requestId, processedRows, result.getMessage());
+                    return result;
+                }
+
                 result.setSuccess(true);
-                result.setImportedRows(safeInt(processedRows));
+                result.setImportedRows(imported);
                 result.setFailedRows(0);
                 result.setMessage("导入成功");
                 heartbeatStoreSuccess(requestId, processedRows);
