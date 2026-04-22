@@ -249,6 +249,7 @@ const startHeartbeatPoll = () => {
   stopHeartbeatPoll()
   // Don't assume heartbeat exists yet; wait for the first successful heartbeat response.
   lastHeartbeatAt.value = 0
+  void pollHeartbeat()
   heartbeatPollTimer.value = window.setInterval(async () => {
     if (status.value !== 'importing') return
     await pollHeartbeat()
