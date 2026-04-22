@@ -92,7 +92,8 @@ public class ExcelParserService {
                 SheetSummary ss = new SheetSummary();
                 ss.setIndex(i);
                 ss.setName(s.getSheetName());
-                ss.setRowCount(s.getLastRowNum());
+                // Physical data rows (row 0 = header), not getLastRowNum() which is last index and misleading for sparse sheets.
+                ss.setRowCount(countPhysicalDataRows(s));
                 summaries.add(ss);
             }
 
@@ -107,8 +108,7 @@ public class ExcelParserService {
             result.setSheetIndex(0);
             result.setSheets(summaries);
 
-            int lastRowNum = sheet.getLastRowNum();
-            result.setRowCount(lastRowNum);
+            result.setRowCount(countPhysicalDataRows(sheet));
 
             short lastCellNum = headerRow.getLastCellNum();
             List<String> columns = new ArrayList<>();
@@ -123,6 +123,17 @@ public class ExcelParserService {
         } catch (IOException e) {
             throw new RuntimeException("Excel解析失败: " + e.getMessage(), e);
         }
+    }
+
+    /** Count physical data rows (row number greater than 0; excludes header row 0). */
+    private static int countPhysicalDataRows(Sheet sheet) {
+        int n = 0;
+        for (Row row : sheet) {
+            if (row.getRowNum() > 0) {
+                n++;
+            }
+        }
+        return n;
     }
 
     private Sheet requireSheet(Workbook workbook, int sheetIndex) {
@@ -489,11 +500,22 @@ public class ExcelParserService {
                 } catch (CsvException e) {
                     throw new IOException("CSV解析失败: " + e.getMessage(), e);
                 }
+                assertStandardCsvMatchesExpectedRowScale(lowerName, filename, sheetIndex, tmpPath);
                 moveIntoPlace(tmpPath, outPath);
                 return outPath;
             }
 
             if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+                ParseResult cached = getParseResult(filename);
+                if (cached != null && cached.getSheets() != null
+                        && sheetIndex >= 0 && sheetIndex < cached.getSheets().size()) {
+                    SheetSummary pick = cached.getSheets().get(sheetIndex);
+                    if (pick.getRowCount() <= 0) {
+                        throw new RuntimeException(
+                                "所选工作表（索引 " + sheetIndex + "，「" + pick.getName() + "」）无数据行（仅有表头或空表）。请在界面选择包含数据的工作表后再导入。");
+                    }
+                }
+
                 try (Workbook workbook = WorkbookFactory.create(inputPath.toFile());
                      Writer writer = Files.newBufferedWriter(tmpPath, StandardCharsets.UTF_8)) {
                     Sheet sheet = requireSheet(workbook, sheetIndex);
@@ -521,9 +543,8 @@ public class ExcelParserService {
                     }
                     CsvStandardizer.writeRow(writer, header, lastCellNum);
 
-                    for (int r = 1; r <= sheet.getLastRowNum(); r++) {
-                        Row row = sheet.getRow(r);
-                        if (row == null) {
+                    for (Row row : sheet) {
+                        if (row.getRowNum() == 0) {
                             continue;
                         }
                         String[] fields = new String[lastCellNum];
@@ -535,6 +556,7 @@ public class ExcelParserService {
                     }
 
                 }
+                assertStandardCsvMatchesExpectedRowScale(lowerName, filename, sheetIndex, tmpPath);
                 moveIntoPlace(tmpPath, outPath);
                 return outPath;
             }
@@ -547,6 +569,38 @@ public class ExcelParserService {
                 // best-effort cleanup only
             }
         }
+    }
+
+    /**
+     * If parse phase recorded many data rows but the materialized standard CSV is tiny, something is inconsistent
+     * (wrong sheet index, sparse Excel vs expectations, etc.) — fail fast instead of producing a misleading LOAD file.
+     */
+    private void assertStandardCsvMatchesExpectedRowScale(String lowerName, String filename, int sheetIndex, Path tmpPath)
+            throws IOException {
+        long sz = Files.size(tmpPath);
+        if (sz >= 8192) {
+            return;
+        }
+        ParseResult pr = getParseResult(filename);
+        if (pr == null) {
+            return;
+        }
+        int expected = -1;
+        if (lowerName.endsWith(".csv")) {
+            expected = pr.getRowCount();
+        } else if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+            if (pr.getSheets() != null && sheetIndex >= 0 && sheetIndex < pr.getSheets().size()) {
+                expected = pr.getSheets().get(sheetIndex).getRowCount();
+            } else {
+                expected = pr.getRowCount();
+            }
+        }
+        if (expected <= 500) {
+            return;
+        }
+        throw new RuntimeException(
+                "生成的标准 CSV 过小（约 " + sz + " 字节），但解析阶段记录约有 " + expected
+                        + " 行数据。请确认：① 多工作表时「工作表索引」是否与含数据的表一致；② Excel 若为大量空行/稀疏存储，请另存为 UTF-8 CSV 再导入。");
     }
 
     private void moveIntoPlace(Path tmpPath, Path outPath) throws IOException {
