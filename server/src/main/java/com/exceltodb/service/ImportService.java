@@ -3,6 +3,7 @@ package com.exceltodb.service;
 import com.exceltodb.config.AppConfig;
 import com.exceltodb.config.DataSourceConfig;
 import com.exceltodb.model.CreateTableRequest;
+import com.exceltodb.model.ColumnMeta;
 import com.exceltodb.model.ImportStage;
 import com.exceltodb.model.ImportRequest;
 import com.exceltodb.model.ImportResult;
@@ -15,11 +16,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.sql.DataSource;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.sql.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Service
@@ -30,17 +29,14 @@ public class ImportService {
     private final DbService dbService;
     private final AppConfig appConfig;
     private final ImportHeartbeatStore heartbeatStore;
-    private final BulkLoadImportService bulkLoadImportService;
 
     public ImportService(DataSourceConfig dataSourceConfig, ExcelParserService excelParserService,
-                        DbService dbService, AppConfig appConfig, ImportHeartbeatStore heartbeatStore,
-                        BulkLoadImportService bulkLoadImportService) {
+                        DbService dbService, AppConfig appConfig, ImportHeartbeatStore heartbeatStore) {
         this.dataSourceConfig = dataSourceConfig;
         this.excelParserService = excelParserService;
         this.dbService = dbService;
         this.appConfig = appConfig;
         this.heartbeatStore = heartbeatStore;
-        this.bulkLoadImportService = bulkLoadImportService;
     }
 
     public ImportResult importData(ImportRequest request) throws IOException, InvalidFormatException {
@@ -50,16 +46,6 @@ public class ImportService {
         String requestId = request.getRequestId();
         if (requestId != null && !requestId.isBlank()) {
             heartbeatStore.start(requestId);
-        }
-
-        if (appConfig.isBulkLoadEnabled()) {
-            try {
-                return bulkLoadImportService.importWithLoadData(ds, request);
-            } catch (Exception e) {
-                result.setSuccess(false);
-                result.setMessage("导入失败: " + e.getMessage());
-                return result;
-            }
         }
 
         long lastProcessedRows = 0;
@@ -114,6 +100,37 @@ public class ImportService {
                 // Determine conflict strategy
                 String conflictAction = getConflictAction(request, headers);
 
+                // Build converters aligned to headers (strict type-driven conversion)
+                String baseTableName = baseTableName(request.getTableName());
+                List<ColumnMeta> metas = dbService.getColumnMetas(request.getDatabaseId(), baseTableName);
+                Map<String, ColumnMeta> metaByLower = new HashMap<>(metas.size() * 2);
+                for (ColumnMeta m : metas) {
+                    if (m != null && m.getName() != null) {
+                        metaByLower.put(m.getName().toLowerCase(Locale.ROOT), m);
+                    }
+                }
+
+                ColumnConverter[] converters = new ColumnConverter[headers.length];
+                for (int i = 0; i < headers.length; i++) {
+                    String h = headers[i] == null ? "" : headers[i].trim();
+                    if (h.isEmpty()) {
+                        throw new RuntimeException("表头包含空列名（第 " + (i + 1) + " 列）");
+                    }
+                    ColumnMeta m = metaByLower.get(h.toLowerCase(Locale.ROOT));
+                    if (m == null) {
+                        throw new RuntimeException("表头列在目标表中不存在: " + h);
+                    }
+                    converters[i] = ColumnConverters.forMySqlType(
+                            m.getDataType(),
+                            m.getColumnType(),
+                            m.isNullable(),
+                            m.getPrecision(),
+                            m.getScale()
+                    );
+                    // Canonicalize header to actual column name to preserve case
+                    headers[i] = m.getName();
+                }
+
                 // Build INSERT SQL
                 StringBuilder sqlBuilder = new StringBuilder();
                 sqlBuilder.append("INSERT ");
@@ -158,7 +175,11 @@ public class ImportService {
                         }
 
                         for (int j = 0; j < headers.length; j++) {
-                            pstmt.setObject(j + 1, convertValue(row[j]));
+                            try {
+                                converters[j].bind(pstmt, j + 1, row[j], rowIndex, j + 1, headers[j]);
+                            } catch (ImportConversionException e) {
+                                throw new RuntimeException(e.getMessage(), e);
+                            }
                         }
 
                         try {
@@ -338,37 +359,14 @@ public class ImportService {
         }
     }
 
-    private Object convertValue(String value) {
-        if (value == null || value.isEmpty()) {
-            return null;
+    private static String baseTableName(String qualifiedTable) {
+        if (qualifiedTable == null || qualifiedTable.isBlank()) {
+            throw new IllegalArgumentException("tableName must not be blank");
         }
-
-        // Try integer
-        try {
-            return Long.parseLong(value.trim());
-        } catch (NumberFormatException ignored) {}
-
-        // Try double
-        try {
-            return new BigDecimal(value.trim());
-        } catch (NumberFormatException ignored) {}
-
-        // Try boolean
-        String lower = value.trim().toLowerCase();
-        if ("true".equals(lower) || "false".equals(lower)) {
-            return "true".equals(lower);
-        }
-
-        // Try datetime
-        try {
-            return LocalDateTime.parse(value.trim(), DateTimeFormatter.ISO_DATE_TIME);
-        } catch (Exception ignored) {}
-
-        try {
-            return LocalDateTime.parse(value.trim().replace(" ", "T"));
-        } catch (Exception ignored) {}
-
-        return value;
+        String[] parts = qualifiedTable.split("\\.");
+        if (parts.length == 1) return parts[0].trim();
+        if (parts.length == 2) return parts[1].trim();
+        throw new IllegalArgumentException("Invalid table identifier: " + qualifiedTable);
     }
 
     public String createTable(CreateTableRequest request) throws IOException, InvalidFormatException {
