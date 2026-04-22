@@ -144,8 +144,6 @@ public final class ColumnConverters {
                 }
                 LocalDateTime dt = parseLocalDateTime(s, fmts);
                 ps.setTimestamp(idx, Timestamp.valueOf(dt));
-            } catch (ImportConversionException e) {
-                throw e;
             } catch (Exception e) {
                 throw fail(row, col, name, typeLabel, raw, e);
             }
@@ -170,8 +168,6 @@ public final class ColumnConverters {
                 }
                 LocalDate d = parseLocalDate(s, fmts);
                 ps.setDate(idx, Date.valueOf(d));
-            } catch (ImportConversionException e) {
-                throw e;
             } catch (Exception e) {
                 throw fail(row, col, name, typeLabel, raw, e);
             }
@@ -210,8 +206,7 @@ public final class ColumnConverters {
             } catch (DateTimeParseException ignored) {
             }
         }
-        // also accept space-separated ISO without seconds: yyyy-MM-dd HH:mm -> above covers, and yyyy-MM-ddTHH:mm via ISO
-        throw new ImportConversionException("无法解析日期时间: " + s);
+        throw new DateTimeParseException("无法解析日期时间", s, 0);
     }
 
     private static LocalDate parseLocalDate(String s, List<DateTimeFormatter> fmts) {
@@ -221,7 +216,7 @@ public final class ColumnConverters {
             } catch (DateTimeParseException ignored) {
             }
         }
-        throw new ImportConversionException("无法解析日期: " + s);
+        throw new DateTimeParseException("无法解析日期", s, 0);
     }
 }
 
