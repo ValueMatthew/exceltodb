@@ -23,7 +23,6 @@ public class AppConfig {
     private String configFile;
     private String uploadTempPath = "./uploads";
     private int batchSize = 5000;
-    private boolean bulkLoadEnabled = true;
 
     private List<DatabaseInfo> databases;
 
@@ -63,10 +62,6 @@ public class AppConfig {
             if (importConfig != null) {
                 Object batchSizeValue = importConfig.getOrDefault("batchSize", batchSize);
                 batchSize = parseBatchSize(batchSizeValue, batchSize);
-                Object bulkLoadEnabledValue = importConfig.get("bulkLoadEnabled");
-                if (bulkLoadEnabledValue != null) {
-                    bulkLoadEnabled = parseBoolean(bulkLoadEnabledValue, bulkLoadEnabled);
-                }
             }
 
             // Always resolve upload dir to an absolute, normalized path to avoid Tomcat-relative issues.
@@ -78,23 +73,6 @@ public class AppConfig {
         } catch (FileNotFoundException e) {
             throw new RuntimeException("配置文件不存在: " + configFile, e);
         }
-    }
-
-    private static boolean parseBoolean(Object value, boolean defaultValue) {
-        if (value == null) return defaultValue;
-        if (value instanceof Boolean b) return b;
-        if (value instanceof Number n) {
-            int i = n.intValue();
-            if (i == 1) return true;
-            if (i == 0) return false;
-            throw new RuntimeException("配置 import.bulkLoadEnabled 数值仅支持 1/0，实际值: " + value);
-        }
-        String s = String.valueOf(value).trim();
-        if ("1".equals(s)) return true;
-        if ("0".equals(s)) return false;
-        if ("true".equalsIgnoreCase(s)) return true;
-        if ("false".equalsIgnoreCase(s)) return false;
-        throw new RuntimeException("配置 import.bulkLoadEnabled 仅支持 true/false 或 1/0，实际值: " + value);
     }
 
     private static int parseBatchSize(Object value, int defaultValue) {
@@ -124,5 +102,14 @@ public class AppConfig {
     public DatabaseInfo getDatabaseById(String id) {
         if (databases == null) return null;
         return databases.stream().filter(db -> db.getId().equals(id)).findFirst().orElse(null);
+    }
+
+    /**
+     * Backward-compat accessor while bulk-load code is being removed.
+     * Bulk-load is now considered disabled; importer will be JDBC-only.
+     */
+    @Deprecated
+    public boolean isBulkLoadEnabled() {
+        return false;
     }
 }
