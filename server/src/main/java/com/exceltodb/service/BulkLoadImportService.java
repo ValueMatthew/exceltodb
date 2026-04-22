@@ -15,7 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -84,7 +85,10 @@ public class BulkLoadImportService {
 
                 lastStage = ImportStage.INSERTING;
                 heartbeatUpdate(requestId, lastStage, 0, "LOAD DATA");
+                String loadDataSqlWarnings = "";
                 loadDataLocal(conn, tmpTable, standardCsvPath, headerColumns);
+                // Must read before COUNT(*) — next statements replace SHOW WARNINGS scope for LOAD DATA.
+                loadDataSqlWarnings = readSqlWarnings(conn);
 
                 processedRows = countRows(conn, tmpTable);
                 lastStage = ImportStage.INSERTING;
@@ -102,8 +106,12 @@ public class BulkLoadImportService {
                     result.setSuccess(false);
                     result.setImportedRows(imported);
                     result.setFailedRows(0);
-                    result.setMessage(
-                            "导入完成但未写入任何数据行：目标表已按 TRUNCATE 清空，但本次文件未产生可导入的行。请检查 CSV/Excel 是否有数据行，或 LOAD DATA LOCAL INFILE 是否实际写入了数据。");
+                    String baseMsg =
+                            "导入完成但未写入任何数据行：目标表已按 TRUNCATE 清空，但本次文件未产生可导入的行。请检查 CSV/Excel 是否有数据行，或 LOAD DATA LOCAL INFILE 是否实际写入了数据。";
+                    if (!loadDataSqlWarnings.isBlank()) {
+                        baseMsg = baseMsg + " MySQL: " + loadDataSqlWarnings;
+                    }
+                    result.setMessage(baseMsg);
                     heartbeatStoreError(requestId, processedRows, result.getMessage());
                     return result;
                 }
@@ -186,8 +194,26 @@ public class BulkLoadImportService {
                 "IGNORE 1 LINES " +
                 "(" + String.join(",", userVars) + ") " +
                 "SET " + setClause;
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.execute();
+        // Connector/J: LOAD DATA LOCAL INFILE is not reliable via PreparedStatement protocol; use Statement.
+        try (Statement st = conn.createStatement()) {
+            st.execute(sql);
+        }
+    }
+
+    private static String readSqlWarnings(Connection conn) throws SQLException {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SHOW WARNINGS")) {
+            StringBuilder sb = new StringBuilder();
+            while (rs.next()) {
+                if (sb.length() > 0) {
+                    sb.append("; ");
+                }
+                String code = rs.getString(2);
+                String message = rs.getString(3);
+                sb.append("[").append(code == null ? "" : code).append("] ")
+                        .append(message == null ? "" : message);
+            }
+            return sb.toString();
         }
     }
 
