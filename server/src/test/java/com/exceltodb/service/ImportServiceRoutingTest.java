@@ -31,6 +31,7 @@ public class ImportServiceRoutingTest {
         DataSource ds = mock(DataSource.class);
         when(dataSourceConfig.getDataSource("db1")).thenReturn(ds);
         when(appConfig.isBulkLoadEnabled()).thenReturn(true);
+        when(excelParserService.getParseResult("a.csv")).thenReturn(null);
 
         ImportRequest request = new ImportRequest();
         request.setDatabaseId("db1");
