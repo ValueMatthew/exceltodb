@@ -443,6 +443,10 @@ public class ExcelParserService {
         return parseCache.get(filename);
     }
 
+    public Set<Path> snapshotActiveUploadPaths() {
+        return new HashSet<>(uploadedFiles.values());
+    }
+
     public Path ensureStandardCsv(String filename, int sheetIndex) throws IOException, InvalidFormatException {
         Path inputPath = uploadedFiles.get(filename);
         if (inputPath == null) {
