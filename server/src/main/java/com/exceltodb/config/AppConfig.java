@@ -12,6 +12,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -22,9 +23,17 @@ public class AppConfig {
 
     private String configFile;
     private String uploadTempPath = "./uploads";
+    private UploadCleanupConfig uploadCleanup = new UploadCleanupConfig();
     private int batchSize = 5000;
 
     private List<DatabaseInfo> databases;
+
+    @Data
+    public static class UploadCleanupConfig {
+        private boolean enabled = true;
+        private Duration ttl = Duration.ofHours(1);
+        private Duration interval = Duration.ofMinutes(10);
+    }
 
     @PostConstruct
     public void loadConfig() {
@@ -55,6 +64,23 @@ public class AppConfig {
             if (uploadConfig != null) {
                 String tempPath = (String) uploadConfig.getOrDefault("tempPath", uploadTempPath);
                 uploadTempPath = tempPath;
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> cleanup = (Map<String, Object>) uploadConfig.get("cleanup");
+                if (cleanup != null) {
+                    Object enabled = cleanup.get("enabled");
+                    if (enabled != null) {
+                        uploadCleanup.setEnabled(Boolean.parseBoolean(String.valueOf(enabled)));
+                    }
+                    Object ttl = cleanup.get("ttl");
+                    if (ttl != null) {
+                        uploadCleanup.setTtl(Duration.parse(String.valueOf(ttl)));
+                    }
+                    Object interval = cleanup.get("interval");
+                    if (interval != null) {
+                        uploadCleanup.setInterval(Duration.parse(String.valueOf(interval)));
+                    }
+                }
             }
 
             @SuppressWarnings("unchecked")
